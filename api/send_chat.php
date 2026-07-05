@@ -29,14 +29,35 @@ if ($conversationId <= 0) {
 }
 
 // 1. جلب بيانات رقم الواتساب المخصص للمستخدم الحالي (أدمن أو موظف) لضمان عدم التداخل
-$numQuery = $conn->prepare("SELECT phone_number_id, whatsapp_business_account_id, access_token FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
-$numQuery->bind_param('i', $currentUserId);
-$numQuery->execute();
-$numResult = $numQuery->get_result()->fetch_assoc();
-$numQuery->close();
+$numResult = null;
+if ($currentUserId > 0) {
+    $numQuery = $conn->prepare("SELECT phone_number_id, whatsapp_business_account_id, access_token FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
+    $numQuery->bind_param('i', $currentUserId);
+    $numQuery->execute();
+    $numResult = $numQuery->get_result()->fetch_assoc();
+    $numQuery->close();
+}
+
+// Fallback: حسابات الأدمن/الشركة (auth/login_company.php) لا تُسجّل user_id في
+// الجلسة أصلاً لأن الأدمن ليس له صف في جدول users، فـ $currentUserId يكون 0
+// ولن يوجد له رقم واتساب شخصي مباشرة. في هذه الحالة نستخدم أي رقم واتساب
+// مربوط بأحد موظفي نفس الشركة كرقم افتراضي، حتى لا يفشل الإرسال بالكامل.
+if (!$numResult) {
+    $fallbackQuery = $conn->prepare("
+        SELECT wn.phone_number_id, wn.whatsapp_business_account_id, wn.access_token
+        FROM whatsapp_numbers wn
+        INNER JOIN users u ON u.id = wn.user_id
+        WHERE u.company_id = ?
+        LIMIT 1
+    ");
+    $fallbackQuery->bind_param('i', $companyId);
+    $fallbackQuery->execute();
+    $numResult = $fallbackQuery->get_result()->fetch_assoc();
+    $fallbackQuery->close();
+}
 
 if (!$numResult) {
-    echo json_encode(['error' => 'لم يتم العثور على رقم واتساب مخصص لهذا الحساب. تأكد من ربطه في قاعدة البيانات.']);
+    echo json_encode(['error' => 'لم يتم العثور على رقم واتساب مخصص لهذا الحساب أو لأي موظف في الشركة. تأكد من ربط رقم واتساب واحد على الأقل من صفحة "أرقام واتساب".']);
     exit;
 }
 

@@ -36,7 +36,7 @@ function ensureCreatedByColumn(mysqli $conn): bool
 
     $has = false;
     $chk = $conn->prepare(
-            "SELECT 1 FROM information_schema.columns
+        "SELECT 1 FROM information_schema.columns
          WHERE table_schema = DATABASE() AND table_name = 'conversations' AND column_name = 'created_by'
          LIMIT 1"
     );
@@ -56,8 +56,41 @@ function ensureCreatedByColumn(mysqli $conn): bool
         }
     }
 
+    // نعمّر (backfill) المحادثات القديمة مرة واحدة فقط لكل جلسة، سواء كان
+    // العمود موجوداً من قبل أو أُضيف الآن للتو، حتى لا يفقد أي موظف الوصول
+    // لمحادثة كان يستخدمها فعلاً قبل تفعيل ميزة العزل.
+    if ($has && empty($_SESSION['_created_by_backfilled'])) {
+        backfillCreatedBy($conn);
+        $_SESSION['_created_by_backfilled'] = true;
+    }
+
     $_SESSION['_has_created_by_col'] = $has;
     return $has;
+}
+
+/**
+ * تعمير (Backfill) عمود created_by لمرة واحدة للمحادثات القديمة الموجودة
+ * قبل إضافة العمود، حتى لا "تختفي" فجأة محادثات كان الموظف يستخدمها فعلاً.
+ * يعتمد على أول user_id ظهر في رسائل المحادثة (chat_messages).
+ * آمن للتنفيذ أكثر من مرة (WHERE created_by IS NULL).
+ */
+function backfillCreatedBy(mysqli $conn): void
+{
+    try {
+        $conn->query(
+            "UPDATE conversations c
+             LEFT JOIN (
+                 SELECT cm.conversation_id, MIN(cm.user_id) AS uid
+                 FROM chat_messages cm
+                 WHERE cm.user_id IS NOT NULL
+                 GROUP BY cm.conversation_id
+             ) t ON t.conversation_id = c.id
+             SET c.created_by = t.uid
+             WHERE c.created_by IS NULL AND t.uid IS NOT NULL"
+        );
+    } catch (\Throwable $e) {
+        // تجاهل بأمان: التعمير تحسين اختياري ولا يجب أن يوقف تحميل الصفحة
+    }
 }
 
 /**
@@ -218,15 +251,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $phoneNumberId = "1165715256628007";
                 $url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
                 $payload = [
-                        "messaging_product" => "whatsapp",
-                        "status" => "edited",
-                        "message_id" => $wamid,
-                        "text" => ["body" => $newBody]
+                    "messaging_product" => "whatsapp",
+                    "status" => "edited",
+                    "message_id" => $wamid,
+                    "text" => ["body" => $newBody]
                 ];
                 $ch = curl_init($url);
                 curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        "Authorization: Bearer " . $accessToken,
-                        "Content-Type: application/json"
+                    "Authorization: Bearer " . $accessToken,
+                    "Content-Type: application/json"
                 ]);
                 curl_setopt($ch, CURLOPT_POST, true);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
@@ -263,14 +296,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $phoneNumberId = "1165715256628007";
                 $url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
                 $payload = [
-                        "messaging_product" => "whatsapp",
-                        "status" => "deleted",
-                        "message_id" => $wamid
+                    "messaging_product" => "whatsapp",
+                    "status" => "deleted",
+                    "message_id" => $wamid
                 ];
                 $ch = curl_init($url);
                 curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        "Authorization: Bearer " . $accessToken,
-                        "Content-Type: application/json"
+                    "Authorization: Bearer " . $accessToken,
+                    "Content-Type: application/json"
                 ]);
                 curl_setopt($ch, CURLOPT_POST, true);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
@@ -355,65 +388,65 @@ include("../layouts/header.php");
 ?>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
 <style>
-    .chat-wrapper { display: flex; height: calc(100vh - 120px); background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; position: relative; }
-    .conv-list { width: 340px; min-width: 340px; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; background: #fff; }
-    .conv-list-header { padding: 12px 16px; font-weight: 700; font-size: 16px; border-bottom: 1px solid #e2e8f0; color: #111b21; display: flex; justify-content: space-between; align-items: center; background: #f0f2f5; }
-    .search-chat-bar { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; background: #fff; display: flex; gap: 8px; align-items: center; }
-    .search-input-wrapper { flex: 1; background: #f0f2f5; border-radius: 8px; padding: 4px 10px; display: flex; align-items: center; gap: 8px; }
-    .search-input-wrapper input { border: none; background: transparent; width: 100%; outline: none; font-size: 13px; color: #111b21; }
-    .btn-new-chat { background: #00a884; color: white; border: none; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-    .conv-list-body { flex: 1; overflow-y: auto; background: #fff; }
-    .conv-item { display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer; border-bottom: 1px solid #f8f9fa; text-decoration: none; transition: background .15s; position: relative; }
-    .conv-item:hover { background: #f5f6f6; }
-    .conv-item.active { background: #eaeaea; }
-    .conv-avatar { width: 44px; height: 44px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 14px; flex-shrink: 0; }
-    .conv-info { flex: 1; min-width: 0; }
-    .conv-name { font-size: 14px; font-weight: 600; color: #111b21; display: flex; align-items: center; gap: 6px; }
-    .conv-preview { font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-    .conv-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; position: relative; }
-    .conv-time { font-size: 11px; color: #667781; }
-    .unread-badge { background: #00a884; color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 20px; min-width: 18px; text-align: center; }
-    .conv-actions-dropdown { display: none; position: absolute; right: 10px; bottom: 2px; background: transparent; border: none; color: #8696a0; cursor: pointer; font-size: 18px; }
-    .conv-item:hover .conv-actions-dropdown { display: block; }
-    .dropdown-menu-wa { display: none; position: absolute; top: 25px; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 9999; min-width: 150px; }
-    .dropdown-menu-wa button { background: none; border: none; width: 100%; text-align: left; padding: 10px 12px; font-size: 13px; color: #111b21; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-    .dropdown-menu-wa button:hover { background: #f5f6f6; }
-    .chat-window { flex: 1; display: flex; flex-direction: column; min-width: 0; background-color: #efeae2; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); }
-    .chat-header { padding: 10px 20px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 12px; background: #f0f2f5; z-index: 10; }
-    .chat-header-avatar { width: 40px; height: 40px; border-radius: 50%; background: #6366f1; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; }
-    .chat-header-info .name { font-size: 15px; font-weight: 600; color: #111b21; }
-    .quick-replies-bar { padding: 8px 16px; background: #f0f2f5; border-bottom: 1px solid #e2e8f0; display: flex; gap: 8px; overflow-x: auto; }
-    .quick-reply-btn { background: #fff; border: 1px solid #d1d7db; border-radius: 16px; padding: 4px 12px; font-size: 12.5px; color: #111b21; cursor: pointer; white-space: nowrap; }
-    .chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column-reverse; gap: 12px; }
-    .msg-row { display: flex; width: 100%; position: relative; }
-    .msg-row.in { justify-content: flex-start; }
-    .msg-row.out { justify-content: flex-end; }
-    .msg-bubble { max-width: 60%; padding: 8px 10px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-break: break-word; display: flex; flex-direction: column; position: relative; box-shadow: 0 1px 0.5px rgba(11,20,26,.13); }
-    .msg-row.in .msg-bubble { background: #fff; border-top-left-radius: 0; color: #111b21; }
-    .msg-row.out .msg-bubble { background: #d9fdd3; border-top-right-radius: 0; color: #111b21; }
-    .msg-options-trigger { display: none; position: absolute; left: -20px; top: 2px; background: transparent; border: none; color: #8696a0; cursor: pointer; font-size: 14px; }
-    .msg-row.out .msg-options-trigger { left: auto; right: -20px; }
-    .msg-bubble:hover .msg-options-trigger { display: block; }
-    .msg-dropdown { display: none; position: absolute; top: 22px; left: -10px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 999; min-width: 120px; }
-    .msg-row.out .msg-dropdown { left: auto; right: -10px; }
-    .msg-dropdown button { background: none; border: none; width: 100%; text-align: right; padding: 6px 10px; font-size: 12px; color: #111b21; cursor: pointer; display: flex; align-items: center; gap: 6px; }
-    .msg-dropdown button:hover { background: #f5f6f6; }
-    .msg-media-img { max-width: 100%; max-height: 250px; border-radius: 6px; object-fit: cover; margin-bottom: 4px; cursor: pointer; }
-    .msg-media-doc { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.05); padding: 8px; border-radius: 6px; text-decoration: none; color: #111b21; margin-bottom: 4px; }
-    .msg-media-sticker { width: 120px; height: 120px; object-fit: contain; }
-    .msg-time { font-size: 11px; color: #667781; margin-top: 2px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
-    .chat-input-area { padding: 10px 16px; background: #f0f2f5; display: flex; gap: 12px; align-items: center; z-index: 10; position: relative; }
-    .input-action-btn { background: transparent; border: none; color: #54656f; font-size: 22px; cursor: pointer; }
-    .chat-input-container { flex: 1; background: #fff; border-radius: 8px; padding: 6px 12px; display: flex; align-items: center; }
-    .chat-input-container textarea { flex: 1; border: none; resize: none; max-height: 100px; outline: none; font-size: 15px; font-family: inherit; line-height: 1.3; padding: 4px 0; }
-    .send-btn-wa { background: transparent; border: none; color: #54656f; font-size: 22px; cursor: pointer; }
-    .native-emoji-picker { position: absolute; bottom: 65px; left: 16px; width: 280px; height: 220px; background: #fff; border: 1px solid #ccc; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; flex-direction: column; z-index: 999; }
-    .emoji-picker-header { padding: 8px; background: #f0f2f5; font-size: 12px; font-weight: bold; color: #667781; border-bottom: 1px solid #e2e8f0; border-top-left-radius: 10px; border-top-right-radius: 10px; }
-    .emoji-picker-grid { flex: 1; overflow-y: auto; padding: 8px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; font-size: 22px; text-align: center; }
-    .emoji-item { cursor: pointer; user-select: none; }
-    .chat-empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #667781; gap: 12px; background: #f8f9fa; border-bottom: 6px solid #00a884; }
-    .chat-empty-state i { font-size: 80px; color: #ced5d8; }
-    #fileInput { display: none; }
+.chat-wrapper { display: flex; height: calc(100vh - 120px); background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; position: relative; }
+.conv-list { width: 340px; min-width: 340px; border-right: 1px solid #e2e8f0; display: flex; flex-direction: column; background: #fff; }
+.conv-list-header { padding: 12px 16px; font-weight: 700; font-size: 16px; border-bottom: 1px solid #e2e8f0; color: #111b21; display: flex; justify-content: space-between; align-items: center; background: #f0f2f5; }
+.search-chat-bar { padding: 8px 12px; border-bottom: 1px solid #e2e8f0; background: #fff; display: flex; gap: 8px; align-items: center; }
+.search-input-wrapper { flex: 1; background: #f0f2f5; border-radius: 8px; padding: 4px 10px; display: flex; align-items: center; gap: 8px; }
+.search-input-wrapper input { border: none; background: transparent; width: 100%; outline: none; font-size: 13px; color: #111b21; }
+.btn-new-chat { background: #00a884; color: white; border: none; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.conv-list-body { flex: 1; overflow-y: auto; background: #fff; }
+.conv-item { display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer; border-bottom: 1px solid #f8f9fa; text-decoration: none; transition: background .15s; position: relative; }
+.conv-item:hover { background: #f5f6f6; }
+.conv-item.active { background: #eaeaea; }
+.conv-avatar { width: 44px; height: 44px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 14px; flex-shrink: 0; }
+.conv-info { flex: 1; min-width: 0; }
+.conv-name { font-size: 14px; font-weight: 600; color: #111b21; display: flex; align-items: center; gap: 6px; }
+.conv-preview { font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.conv-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; position: relative; }
+.conv-time { font-size: 11px; color: #667781; }
+.unread-badge { background: #00a884; color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 20px; min-width: 18px; text-align: center; }
+.conv-actions-dropdown { display: none; position: absolute; right: 10px; bottom: 2px; background: transparent; border: none; color: #8696a0; cursor: pointer; font-size: 18px; }
+.conv-item:hover .conv-actions-dropdown { display: block; }
+.dropdown-menu-wa { display: none; position: absolute; top: 25px; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 9999; min-width: 150px; }
+.dropdown-menu-wa button { background: none; border: none; width: 100%; text-align: left; padding: 10px 12px; font-size: 13px; color: #111b21; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.dropdown-menu-wa button:hover { background: #f5f6f6; }
+.chat-window { flex: 1; display: flex; flex-direction: column; min-width: 0; background-color: #efeae2; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); }
+.chat-header { padding: 10px 20px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 12px; background: #f0f2f5; z-index: 10; }
+.chat-header-avatar { width: 40px; height: 40px; border-radius: 50%; background: #6366f1; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; }
+.chat-header-info .name { font-size: 15px; font-weight: 600; color: #111b21; }
+.quick-replies-bar { padding: 8px 16px; background: #f0f2f5; border-bottom: 1px solid #e2e8f0; display: flex; gap: 8px; overflow-x: auto; }
+.quick-reply-btn { background: #fff; border: 1px solid #d1d7db; border-radius: 16px; padding: 4px 12px; font-size: 12.5px; color: #111b21; cursor: pointer; white-space: nowrap; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column-reverse; gap: 12px; }
+.msg-row { display: flex; width: 100%; position: relative; }
+.msg-row.in { justify-content: flex-start; }
+.msg-row.out { justify-content: flex-end; }
+.msg-bubble { max-width: 60%; padding: 8px 10px; border-radius: 8px; font-size: 14px; line-height: 1.4; word-break: break-word; display: flex; flex-direction: column; position: relative; box-shadow: 0 1px 0.5px rgba(11,20,26,.13); }
+.msg-row.in .msg-bubble { background: #fff; border-top-left-radius: 0; color: #111b21; }
+.msg-row.out .msg-bubble { background: #d9fdd3; border-top-right-radius: 0; color: #111b21; }
+.msg-options-trigger { display: none; position: absolute; left: -20px; top: 2px; background: transparent; border: none; color: #8696a0; cursor: pointer; font-size: 14px; }
+.msg-row.out .msg-options-trigger { left: auto; right: -20px; }
+.msg-bubble:hover .msg-options-trigger { display: block; }
+.msg-dropdown { display: none; position: absolute; top: 22px; left: -10px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 999; min-width: 120px; }
+.msg-row.out .msg-dropdown { left: auto; right: -10px; }
+.msg-dropdown button { background: none; border: none; width: 100%; text-align: right; padding: 6px 10px; font-size: 12px; color: #111b21; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.msg-dropdown button:hover { background: #f5f6f6; }
+.msg-media-img { max-width: 100%; max-height: 250px; border-radius: 6px; object-fit: cover; margin-bottom: 4px; cursor: pointer; }
+.msg-media-doc { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.05); padding: 8px; border-radius: 6px; text-decoration: none; color: #111b21; margin-bottom: 4px; }
+.msg-media-sticker { width: 120px; height: 120px; object-fit: contain; }
+.msg-time { font-size: 11px; color: #667781; margin-top: 2px; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 3px; }
+.chat-input-area { padding: 10px 16px; background: #f0f2f5; display: flex; gap: 12px; align-items: center; z-index: 10; position: relative; }
+.input-action-btn { background: transparent; border: none; color: #54656f; font-size: 22px; cursor: pointer; }
+.chat-input-container { flex: 1; background: #fff; border-radius: 8px; padding: 6px 12px; display: flex; align-items: center; }
+.chat-input-container textarea { flex: 1; border: none; resize: none; max-height: 100px; outline: none; font-size: 15px; font-family: inherit; line-height: 1.3; padding: 4px 0; }
+.send-btn-wa { background: transparent; border: none; color: #54656f; font-size: 22px; cursor: pointer; }
+.native-emoji-picker { position: absolute; bottom: 65px; left: 16px; width: 280px; height: 220px; background: #fff; border: 1px solid #ccc; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; flex-direction: column; z-index: 999; }
+.emoji-picker-header { padding: 8px; background: #f0f2f5; font-size: 12px; font-weight: bold; color: #667781; border-bottom: 1px solid #e2e8f0; border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.emoji-picker-grid { flex: 1; overflow-y: auto; padding: 8px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; font-size: 22px; text-align: center; }
+.emoji-item { cursor: pointer; user-select: none; }
+.chat-empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #667781; gap: 12px; background: #f8f9fa; border-bottom: 6px solid #00a884; }
+.chat-empty-state i { font-size: 80px; color: #ced5d8; }
+#fileInput { display: none; }
 </style>
 <div class="chat-wrapper">
     <div class="conv-list">
@@ -604,122 +637,122 @@ include("../layouts/header.php");
 </div>
 
 <script>
-    // ── سكربت عام: يعمل دائماً بغض النظر عن وجود محادثة نشطة ──
-    function toggleDropdownMenu(event, id) {
-        if (event) { event.stopPropagation(); event.preventDefault(); }
-        const menus = document.querySelectorAll('.dropdown-menu-wa');
-        menus.forEach(menu => { if (menu.id !== 'dropdown-' + id) menu.style.display = 'none'; });
-        const current = document.getElementById('dropdown-' + id);
-        if (current) current.style.display = current.style.display === 'block' ? 'none' : 'block';
+// ── سكربت عام: يعمل دائماً بغض النظر عن وجود محادثة نشطة ──
+function toggleDropdownMenu(event, id) {
+    if (event) { event.stopPropagation(); event.preventDefault(); }
+    const menus = document.querySelectorAll('.dropdown-menu-wa');
+    menus.forEach(menu => { if (menu.id !== 'dropdown-' + id) menu.style.display = 'none'; });
+    const current = document.getElementById('dropdown-' + id);
+    if (current) current.style.display = current.style.display === 'block' ? 'none' : 'block';
+}
+function toggleMsgDropdown(event, id) {
+    if (event) { event.stopPropagation(); event.preventDefault(); }
+    const menus = document.querySelectorAll('.msg-dropdown');
+    menus.forEach(menu => { if (menu.id !== 'msg-drop-' + id) menu.style.display = 'none'; });
+    const current = document.getElementById('msg-drop-' + id);
+    if (current) current.style.display = current.style.display === 'block' ? 'none' : 'block';
+}
+document.addEventListener('click', function (e) {
+    if (!e.target.closest('.dropdown-zone')) {
+        document.querySelectorAll('.dropdown-menu-wa').forEach(m => m.style.display = 'none');
     }
-    function toggleMsgDropdown(event, id) {
-        if (event) { event.stopPropagation(); event.preventDefault(); }
-        const menus = document.querySelectorAll('.msg-dropdown');
-        menus.forEach(menu => { if (menu.id !== 'msg-drop-' + id) menu.style.display = 'none'; });
-        const current = document.getElementById('msg-drop-' + id);
-        if (current) current.style.display = current.style.display === 'block' ? 'none' : 'block';
+    if (!e.target.closest('.msg-bubble')) {
+        document.querySelectorAll('.msg-dropdown').forEach(m => m.style.display = 'none');
     }
-    document.addEventListener('click', function (e) {
-        if (!e.target.closest('.dropdown-zone')) {
-            document.querySelectorAll('.dropdown-menu-wa').forEach(m => m.style.display = 'none');
-        }
-        if (!e.target.closest('.msg-bubble')) {
-            document.querySelectorAll('.msg-dropdown').forEach(m => m.style.display = 'none');
-        }
+});
+function openEditModal(id, currentVal) {
+    if (event) event.stopPropagation();
+    document.getElementById('editConvId').value = id;
+    document.getElementById('editNumberInput').value = currentVal;
+    toggleModal('editChatModal');
+}
+function openEditMsgModal(id, currentText) {
+    if (event) event.stopPropagation();
+    document.getElementById('editMsgId').value = id;
+    document.getElementById('editMsgBodyInput').value = currentText;
+    toggleModal('editMsgModal');
+}
+function toggleModal(modalId) {
+    const m = document.getElementById(modalId);
+    if (m) m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+}
+function filterConversations() {
+    const query = document.getElementById('convSearch').value.toLowerCase();
+    document.querySelectorAll('.conv-item').forEach(item => {
+        const num = item.getAttribute('data-number').toLowerCase();
+        item.style.display = num.includes(query) ? 'flex' : 'none';
     });
-    function openEditModal(id, currentVal) {
-        if (event) event.stopPropagation();
-        document.getElementById('editConvId').value = id;
-        document.getElementById('editNumberInput').value = currentVal;
-        toggleModal('editChatModal');
-    }
-    function openEditMsgModal(id, currentText) {
-        if (event) event.stopPropagation();
-        document.getElementById('editMsgId').value = id;
-        document.getElementById('editMsgBodyInput').value = currentText;
-        toggleModal('editMsgModal');
-    }
-    function toggleModal(modalId) {
-        const m = document.getElementById(modalId);
-        if (m) m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
-    }
-    function filterConversations() {
-        const query = document.getElementById('convSearch').value.toLowerCase();
-        document.querySelectorAll('.conv-item').forEach(item => {
-            const num = item.getAttribute('data-number').toLowerCase();
-            item.style.display = num.includes(query) ? 'flex' : 'none';
-        });
-    }
+}
 </script>
 
 <script>
-    /*
-     * ── سكربت الرسائل/المحادثة النشطة ──
-     * هام: هذا السكربت يُطبع دائماً (غير موضوع داخل شرط PHP واحد) حتى تبقى
-     * CONV_ID و lastMsgId معرّفتين بقيمة افتراضية (0) في كل الحالات، فلا
-     * تتوقف أزرار الإرسال/الإيموجي حتى عند عدم وجود محادثة نشطة.
-     */
-    const CONV_ID = <?php echo (int) $activeConvId; ?>;
-    const API_BASE = '/wa_saas/api';
-    let lastMsgId = <?php echo (int) $lastMsgId; ?>;
-    let polling = null;
+/*
+ * ── سكربت الرسائل/المحادثة النشطة ──
+ * هام: هذا السكربت يُطبع دائماً (غير موضوع داخل شرط PHP واحد) حتى تبقى
+ * CONV_ID و lastMsgId معرّفتين بقيمة افتراضية (0) في كل الحالات، فلا
+ * تتوقف أزرار الإرسال/الإيموجي حتى عند عدم وجود محادثة نشطة.
+ */
+const CONV_ID = <?php echo (int) $activeConvId; ?>;
+const API_BASE = '/wa_saas/api';
+let lastMsgId = <?php echo (int) $lastMsgId; ?>;
+let polling = null;
 
-    const msgInput = document.getElementById('msgInput');
-    const sendBtn = document.getElementById('sendBtn');
-    const emojiBtn = document.getElementById('emojiBtn');
-    const pickerEl = document.getElementById('nativeEmojiPicker');
-    const grid = document.getElementById('emojiGrid');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+const emojiBtn = document.getElementById('emojiBtn');
+const pickerEl = document.getElementById('nativeEmojiPicker');
+const grid = document.getElementById('emojiGrid');
 
-    const emojisList = [
-        '😀', '😃', '😄', '😁', '😆', '😅', '😂', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗',
-        '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '📌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👍', '👎', '❤️'
-    ];
+const emojisList = [
+    '😀', '😃', '😄', '😁', '😆', '😅', '😂', '😊', '😇', '🙂', '🙃', '😉', '😌', '😍', '🥰', '😘', '😗',
+    '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤌', '📌', '✌️', '🤞', '🤟', '🤘', '🤙', '👈', '👉', '👍', '👎', '❤️'
+];
 
-    if (grid) {
-        emojisList.forEach(emoji => {
-            const span = document.createElement('span');
-            span.className = 'emoji-item';
-            span.innerText = emoji;
-            span.onclick = () => { if (msgInput) msgInput.value += emoji; };
-            grid.appendChild(span);
-        });
-    }
+if (grid) {
+    emojisList.forEach(emoji => {
+        const span = document.createElement('span');
+        span.className = 'emoji-item';
+        span.innerText = emoji;
+        span.onclick = () => { if (msgInput) msgInput.value += emoji; };
+        grid.appendChild(span);
+    });
+}
 
-    if (emojiBtn && pickerEl) {
-        emojiBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            pickerEl.style.display = pickerEl.style.display === 'flex' ? 'none' : 'flex';
-        });
-        document.addEventListener('click', (e) => {
-            if (!pickerEl.contains(e.target) && e.target !== emojiBtn) pickerEl.style.display = 'none';
-        });
-    }
+if (emojiBtn && pickerEl) {
+    emojiBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pickerEl.style.display = pickerEl.style.display === 'flex' ? 'none' : 'flex';
+    });
+    document.addEventListener('click', (e) => {
+        if (!pickerEl.contains(e.target) && e.target !== emojiBtn) pickerEl.style.display = 'none';
+    });
+}
 
-    if (msgInput) {
-        msgInput.addEventListener('input', () => {
-            msgInput.style.height = 'auto';
-            msgInput.style.height = Math.min(msgInput.scrollHeight, 100) + 'px';
-        });
-    }
+if (msgInput) {
+    msgInput.addEventListener('input', () => {
+        msgInput.style.height = 'auto';
+        msgInput.style.height = Math.min(msgInput.scrollHeight, 100) + 'px';
+    });
+}
 
-    function scrollToBottom() {
-        const box = document.getElementById('chatMessages');
-        if (box) box.scrollTop = box.scrollHeight;
-    }
+function scrollToBottom() {
+    const box = document.getElementById('chatMessages');
+    if (box) box.scrollTop = box.scrollHeight;
+}
 
-    function escapeHtml(str) {
-        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-    }
+function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
 
-    function renderMessage(msg) {
-        const time = msg.sent_at.substring(11, 16);
-        const ticks = msg.direction === 'out' ? '<i class="bi bi-check2-all text-primary"></i>' : '';
-        let mediaContent = '';
-        if (msg.message_type === 'image') mediaContent = `<img src="${msg.file_path}" class="msg-media-img" onclick="window.open(this.src)">`;
-        else if (msg.message_type === 'sticker') mediaContent = `<img src="${msg.file_path}" class="msg-media-sticker">`;
-        else if (msg.message_type === 'document') mediaContent = `<a href="${msg.file_path}" target="_blank" class="msg-media-doc"><i class="bi bi-file-earmark-arrow-down-fill text-secondary fs-3"></i><span>Download File</span></a>`;
-        let bodyContent = msg.body ? `<div class="msg-body-text">${escapeHtml(msg.body).replace(/\n/g, '<br>')}</div>` : '';
-        let dropdownMenu = `
+function renderMessage(msg) {
+    const time = msg.sent_at.substring(11, 16);
+    const ticks = msg.direction === 'out' ? '<i class="bi bi-check2-all text-primary"></i>' : '';
+    let mediaContent = '';
+    if (msg.message_type === 'image') mediaContent = `<img src="${msg.file_path}" class="msg-media-img" onclick="window.open(this.src)">`;
+    else if (msg.message_type === 'sticker') mediaContent = `<img src="${msg.file_path}" class="msg-media-sticker">`;
+    else if (msg.message_type === 'document') mediaContent = `<a href="${msg.file_path}" target="_blank" class="msg-media-doc"><i class="bi bi-file-earmark-arrow-down-fill text-secondary fs-3"></i><span>Download File</span></a>`;
+    let bodyContent = msg.body ? `<div class="msg-body-text">${escapeHtml(msg.body).replace(/\n/g, '<br>')}</div>` : '';
+    let dropdownMenu = `
         <button type="button" class="msg-options-trigger" onclick="toggleMsgDropdown(event, ${msg.id})"><i class="bi bi-chevron-down"></i></button>
         <div class="msg-dropdown" id="msg-drop-${msg.id}">
             ${msg.message_type === 'text' ? `<button type="button" onclick="openEditMsgModal(${msg.id}, '${escapeHtml(msg.body)}')"><i class="bi bi-pencil"></i> تعديل للجميع</button>` : ''}
@@ -730,86 +763,90 @@ include("../layouts/header.php");
             </form>
         </div>
     `;
-        return `<div class="msg-row ${msg.direction}" data-id="${msg.id}"><div class="msg-bubble">${dropdownMenu}${mediaContent}${bodyContent}<div class="msg-time">${time} ${ticks}</div></div></div>`;
-    }
+    return `<div class="msg-row ${msg.direction}" data-id="${msg.id}"><div class="msg-bubble">${dropdownMenu}${mediaContent}${bodyContent}<div class="msg-time">${time} ${ticks}</div></div></div>`;
+}
 
-    function handleFileSelect(input) {
-        if (input.files && input.files[0]) {
-            const file = input.files[0];
-            let type = 'document';
-            if (file.type.startsWith('image/')) type = file.name.endsWith('.webp') ? 'sticker' : 'image';
-            sendData(type, file, '');
-            input.value = '';
+function handleFileSelect(input) {
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        let type = 'document';
+        if (file.type.startsWith('image/')) type = file.name.endsWith('.webp') ? 'sticker' : 'image';
+        sendData(type, file, '');
+        input.value = '';
+    }
+}
+
+function sendQuickReply(text) { sendData('text', null, text); }
+
+async function sendData(type, file, textBody) {
+    if (!CONV_ID) {
+            console.warn('لا توجد محادثة نشطة لإرسال رسالة إليها.');
+            alert('لا يمكن الإرسال: لا توجد محادثة مفتوحة حالياً، أو لا تملك صلاحية الوصول لهذه المحادثة. اختر محادثة من القائمة الجانبية أولاً.');
+            return;
         }
-    }
-
-    function sendQuickReply(text) { sendData('text', null, text); }
-
-    async function sendData(type, file, textBody) {
-        if (!CONV_ID) { console.warn('لا توجد محادثة نشطة لإرسال رسالة إليها.'); return; }
-        if (sendBtn) sendBtn.disabled = true;
-        const formData = new FormData();
-        formData.append('conversation_id', CONV_ID);
-        formData.append('message_type', type);
-        if (file) formData.append('attachment', file);
-        if (textBody) formData.append('message', textBody);
-        try {
-            const res = await fetch(`${API_BASE}/send_chat.php`, { method: 'POST', body: formData });
-            const data = await res.json();
-            if (data.id) {
-                document.getElementById('chatMessages').insertAdjacentHTML('afterbegin', renderMessage({
-                    id: data.id, direction: 'out', message_type: type, file_path: data.file_path || '',
-                    body: textBody, sent_at: data.sent_at || new Date().toISOString()
-                }));
-                lastMsgId = Math.max(lastMsgId, data.id);
-            }
-        } catch (e) {
-            console.error(e);
-        } finally {
-            if (sendBtn) sendBtn.disabled = false;
-            if (msgInput) msgInput.focus();
+    if (sendBtn) sendBtn.disabled = true;
+    const formData = new FormData();
+    formData.append('conversation_id', CONV_ID);
+    formData.append('message_type', type);
+    if (file) formData.append('attachment', file);
+    if (textBody) formData.append('message', textBody);
+    try {
+        const res = await fetch(`${API_BASE}/send_chat.php`, { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.id) {
+            document.getElementById('chatMessages').insertAdjacentHTML('afterbegin', renderMessage({
+                id: data.id, direction: 'out', message_type: type, file_path: data.file_path || '',
+                body: textBody, sent_at: data.sent_at || new Date().toISOString()
+            }));
+            lastMsgId = Math.max(lastMsgId, data.id);
         }
+    } catch (e) {
+        console.error(e);
+    } finally {
+        if (sendBtn) sendBtn.disabled = false;
+        if (msgInput) msgInput.focus();
     }
+}
 
-    async function sendMessage() {
-        if (!msgInput) return;
-        const text = msgInput.value.trim();
-        if (!text) return;
-        msgInput.value = '';
-        msgInput.style.height = 'auto';
-        await sendData('text', null, text);
-    }
+async function sendMessage() {
+    if (!msgInput) return;
+    const text = msgInput.value.trim();
+    if (!text) return;
+    msgInput.value = '';
+    msgInput.style.height = 'auto';
+    await sendData('text', null, text);
+}
 
-    function pollMessages() {
-        if (!CONV_ID) return;
-        fetch(`${API_BASE}/get_messages.php?conversation_id=${CONV_ID}&after_id=${lastMsgId}`)
-            .then(r => r.json())
-            .then(data => {
-                if (!data.messages || data.messages.length === 0) return;
-                const box = document.getElementById('chatMessages');
-                if (!box) return;
-                data.messages.forEach(msg => {
-                    if (document.querySelector(`[data-id="${msg.id}"]`)) return;
-                    box.insertAdjacentHTML('afterbegin', renderMessage(msg));
-                    lastMsgId = Math.max(lastMsgId, msg.id);
-                });
-            }).catch(() => {});
-    }
+function pollMessages() {
+    if (!CONV_ID) return;
+    fetch(`${API_BASE}/get_messages.php?conversation_id=${CONV_ID}&after_id=${lastMsgId}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data.messages || data.messages.length === 0) return;
+            const box = document.getElementById('chatMessages');
+            if (!box) return;
+            data.messages.forEach(msg => {
+                if (document.querySelector(`[data-id="${msg.id}"]`)) return;
+                box.insertAdjacentHTML('afterbegin', renderMessage(msg));
+                lastMsgId = Math.max(lastMsgId, msg.id);
+            });
+        }).catch(() => {});
+}
 
-    if (msgInput) {
-        msgInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-        });
-    }
-    if (sendBtn) {
-        sendBtn.addEventListener('click', sendMessage);
-    }
+if (msgInput) {
+    msgInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+}
+if (sendBtn) {
+    sendBtn.addEventListener('click', sendMessage);
+}
 
-    // الاستطلاع (polling) يبدأ فقط عند وجود محادثة نشطة فعلياً
-    if (CONV_ID > 0) {
-        polling = setInterval(pollMessages, 3000);
-    }
-    window.addEventListener('beforeunload', () => { if (polling) clearInterval(polling); });
+// الاستطلاع (polling) يبدأ فقط عند وجود محادثة نشطة فعلياً
+if (CONV_ID > 0) {
+    polling = setInterval(pollMessages, 3000);
+}
+window.addEventListener('beforeunload', () => { if (polling) clearInterval(polling); });
 </script>
 
 <?php include("../layouts/footer.php"); ?>
