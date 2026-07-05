@@ -167,9 +167,13 @@ $upd->execute();
 $upd->close();
 
 echo json_encode([
-    'success'      => true,
-    'id'           => $newMsgId,
-    'file_path'    => $filePath,
-    'sent_at'      => date('Y-m-d H:i:s'),
-    'meta_status'  => $httpCode
+    'success'       => true,
+    'id'            => $newMsgId,
+    'file_path'     => $filePath,
+    'sent_at'       => date('Y-m-d H:i:s'),
+    'meta_status'   => $httpCode,
+    // مؤقت للتشخيص فقط: نص خطأ Meta الكامل حتى نعرف السبب الدقيق للفشل.
+    // يُحذف بعد حل المشكلة.
+    'meta_response' => $response,
+    'phone_number_id_used' => $phoneNumberId
 ]);
