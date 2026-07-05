@@ -31,7 +31,7 @@ if ($conversationId <= 0) {
 // 1. جلب بيانات رقم الواتساب المخصص للمستخدم الحالي (أدمن أو موظف) لضمان عدم التداخل
 $numResult = null;
 if ($currentUserId > 0) {
-    $numQuery = $conn->prepare("SELECT phone_number_id, whatsapp_business_account_id, access_token FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
+    $numQuery = $conn->prepare("SELECT phone_number_id, access_token FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
     $numQuery->bind_param('i', $currentUserId);
     $numQuery->execute();
     $numResult = $numQuery->get_result()->fetch_assoc();
@@ -44,7 +44,7 @@ if ($currentUserId > 0) {
 // مربوط بأحد موظفي نفس الشركة كرقم افتراضي، حتى لا يفشل الإرسال بالكامل.
 if (!$numResult) {
     $fallbackQuery = $conn->prepare("
-        SELECT wn.phone_number_id, wn.whatsapp_business_account_id, wn.access_token
+        SELECT wn.phone_number_id, wn.access_token
         FROM whatsapp_numbers wn
         INNER JOIN users u ON u.id = wn.user_id
         WHERE u.company_id = ?
@@ -149,7 +149,7 @@ $insStmt = $conn->prepare("
     INSERT INTO chat_messages (conversation_id, user_id, direction, body, message_type, file_path, whatsapp_msg_id, sent_at) 
     VALUES (?, ?, 'out', ?, ?, ?, ?, NOW())
 ");
-$insStmt->bind_param('iisssss', $conversationId, $currentUserId, $messageBody, $messageType, $filePath, $wamid);
+$insStmt->bind_param('iissss', $conversationId, $currentUserId, $messageBody, $messageType, $filePath, $wamid);
 $insStmt->execute();
 $newMsgId = $insStmt->insert_id;
 $insStmt->close();
