@@ -28,10 +28,16 @@ if ($conversationId <= 0) {
     exit;
 }
 
+// ملاحظة: جدول whatsapp_numbers الحالي لا يحتوي على عمود access_token
+// (نفس التوكن المستخدم قديمًا داخل dashboard/chat.php مباشرة قبل الفصل).
+// نُبقيه هنا كثابت مؤقت لحين نقله لمكان آمن (متغير بيئة / إعدادات)، وهذا
+// نفس التوكن الذي كان يعمل فعليًا في الكود الأصلي.
+const WHATSAPP_ACCESS_TOKEN = "EAAZBGtwMbSu0BR45Cvl2BYZCkupVr6DgwytZAt7sXfuBdyQy8bmlyLfKOuVmERuGXZCjtmt7wkgRKRcPUWLajhIrhi6ZCSU50SBzfjUsEw1aIZCSqwbhYIkdTEDd2WA0OZBDH4mYjoaaoQgxjTZCAy0y9akeZAZAwQgcUxkYxuaE2k3uCflKVz6wmZB33Twk5VoBzwaY8kkaBStt8iX5ZA1BCV9XZBb1G1ip7RXMZCp7dE6ZC2v8MvL3rxK6ZCoHtQi6njFGHRrV98rC4s4vwc9OP2m1nbDl";
+
 // 1. جلب بيانات رقم الواتساب المخصص للمستخدم الحالي (أدمن أو موظف) لضمان عدم التداخل
 $numResult = null;
 if ($currentUserId > 0) {
-    $numQuery = $conn->prepare("SELECT phone_number_id, access_token FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
+    $numQuery = $conn->prepare("SELECT phone_number_id FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
     $numQuery->bind_param('i', $currentUserId);
     $numQuery->execute();
     $numResult = $numQuery->get_result()->fetch_assoc();
@@ -44,7 +50,7 @@ if ($currentUserId > 0) {
 // مربوط بأحد موظفي نفس الشركة كرقم افتراضي، حتى لا يفشل الإرسال بالكامل.
 if (!$numResult) {
     $fallbackQuery = $conn->prepare("
-        SELECT wn.phone_number_id, wn.access_token
+        SELECT wn.phone_number_id
         FROM whatsapp_numbers wn
         INNER JOIN users u ON u.id = wn.user_id
         WHERE u.company_id = ?
@@ -62,7 +68,7 @@ if (!$numResult) {
 }
 
 $phoneNumberId = $numResult['phone_number_id'];
-$accessToken   = $numResult['access_token'];
+$accessToken   = WHATSAPP_ACCESS_TOKEN;
 
 // 2. جلب رقم هاتف العميل من المحادثة الحالية
 $convQuery = $conn->prepare("SELECT contact_number FROM conversations WHERE id = ? AND company_id = ? LIMIT 1");
