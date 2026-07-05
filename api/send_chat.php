@@ -32,7 +32,7 @@ if ($conversationId <= 0) {
 // (نفس التوكن المستخدم قديمًا داخل dashboard/chat.php مباشرة قبل الفصل).
 // نُبقيه هنا كثابت مؤقت لحين نقله لمكان آمن (متغير بيئة / إعدادات)، وهذا
 // نفس التوكن الذي كان يعمل فعليًا في الكود الأصلي.
-const WHATSAPP_ACCESS_TOKEN = "EAAZBGtwMbSu0BR45Cvl2BYZCkupVr6DgwytZAt7sXfuBdyQy8bmlyLfKOuVmERuGXZCjtmt7wkgRKRcPUWLajhIrhi6ZCSU50SBzfjUsEw1aIZCSqwbhYIkdTEDd2WA0OZBDH4mYjoaaoQgxjTZCAy0y9akeZAZAwQgcUxkYxuaE2k3uCflKVz6wmZB33Twk5VoBzwaY8kkaBStt8iX5ZA1BCV9XZBb1G1ip7RXMZCp7dE6ZC2v8MvL3rxK6ZCoHtQi6njFGHRrV98rC4s4vwc9OP2m1nbDl";
+const WHATSAPP_ACCESS_TOKEN = "EAAZBGtwMbSu0BR2aV2JmjOSNmHHBQAHrYyCcjDoSZCktJ5seX4XXGy8ci42Gb46oz2ZCZAWwOZBCF35kGXH9euUYgSeiZBJL5qeXtk1VXcPW9HM3idG1pZBh8R3LuAxOUKkjHA0cDd7j3gA6j57ym9EjPCfoSFRmtukVfP4nktiHnsmZCUCSlmGvWn6A7UYtklN0Brsk2LdKavex72zsvvzcRxSFaR1ZArhzO60furZCFxo7jS2hfTuVGl1aypLrqCAihmvNVYPVFcegtjDHZB91xApTZCn3";
 
 // 1. جلب بيانات رقم الواتساب المخصص للمستخدم الحالي (أدمن أو موظف) لضمان عدم التداخل
 $numResult = null;
@@ -142,7 +142,6 @@ $response = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 curl_close($ch);
 
-$resData = json_encode($response);
 $wamid = null;
 
 if ($httpCode >= 200 && $httpCode < 300) {
