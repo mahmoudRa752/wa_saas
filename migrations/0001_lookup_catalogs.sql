@@ -1,16 +1,18 @@
 -- =============================================================================
 -- Migration: 0001_lookup_catalogs.sql
--- Purpose  : Creates the static, company-independent lookup/catalog tables that
---            everything else in the omnichannel schema will reference:
---              - channels    (WhatsApp, Telegram, Instagram, Messenger, Email, ...)
---              - providers   (Meta Cloud API, Evolution API, WAHA, 360Dialog, Twilio, ...)
---              - plans       (billing tiers; company_id relationship added in 0002/0014)
---              - permissions (fine-grained RBAC permission slugs)
---              - features    (feature-flag catalog; plan/company entitlement tables come in 0014)
+-- Purpose  : Creates the static, workspace-independent lookup/catalog tables
+--            that everything else in the omnichannel schema will reference:
+--              - channels         (WhatsApp, Telegram, Instagram, Messenger, Email, ...)
+--              - providers        (Meta Cloud API, Evolution API, WAHA, 360Dialog, Twilio, ...)
+--              - plans            (billing tiers; workspace_id relationship added in 0002/0014)
+--              - permissions      (fine-grained RBAC permission slugs)
+--              - features         (feature-flag catalog; plan/workspace entitlement tables come in 0014)
+--              - workspace_types  (Individual, Team, Company, Organization -- 0002 tenancy pivot)
+--              - workspace_statuses (Active, Trial, Pending, Suspended, Archived -- 0002 tenancy pivot)
 --
 -- Revision history:
 --   v1 (initial) : first draft, pushed for review.
---   v2 (this)    : brought into compliance with the project-wide DB standards
+--   v2            : brought into compliance with the project-wide DB standards
 --                  agreed after v1 was reviewed. Changes vs v1:
 --                    - channels/providers PK switched TINYINT UNSIGNED -> BIGINT
 --                      UNSIGNED, matching standard #8 uniformly across catalogs
@@ -28,6 +30,26 @@
 --                  No data existed under v1 (this table was never seeded or
 --                  referenced by app code), so this is a safe in-place revision,
 --                  not a breaking change. See backward-compatibility note below.
+--   v3 (this)    : product-vision pivot from "WhatsApp SaaS for companies" to
+--                  "Enterprise Omnichannel Platform" where the tenant root is a
+--                  Workspace (Individual/Team/Company/Organization), not
+--                  necessarily a Company. Changes vs v2:
+--                    - Added `workspace_types` lookup table (replaces a plain
+--                      ENUM on workspaces.type so each type can later carry
+--                      metadata, e.g. default_max_users, without a schema
+--                      change -- same rationale as every other catalog table
+--                      in this file).
+--                    - Added `workspace_statuses` lookup table (Active, Trial,
+--                      Pending, Suspended, Archived) so lifecycle state is
+--                      data, not an ENUM, and integrates naturally with future
+--                      billing/subscription logic (0014_billing.sql).
+--                    - Doc comments referencing "company-independent" /
+--                      "company_id" updated to "workspace-independent" /
+--                      "workspace_id" to match the frozen tenancy model; no
+--                      column or table name in this file actually changes.
+--                  Both new tables are additive only; nothing in v1/v2 of this
+--                  file is altered structurally, so this remains a safe,
+--                  non-breaking revision. See backward-compatibility note below.
 --
 -- Depends on : nothing (first schema-creating migration; 0000_schema_versions.sql
 --              precedes this file once approved, but has no structural dependency
@@ -46,9 +68,11 @@
 --      seeding happens in 0021_seed_catalogs.sql.
 --   4. Rollback/recovery if something fails?  Since no data or downstream FKs
 --      exist yet, rollback = `DROP TABLE IF EXISTS providers, channels, plans,
---      permissions, features;` then re-apply the corrected file. This simple
---      rollback stops being viable once 0002+ add real FKs pointing at `plans`
---      -- from that point on, rollback requires dropping dependents first.
+--      permissions, features, workspace_types, workspace_statuses;` then
+--      re-apply the corrected file. This simple rollback stops being viable
+--      once 0002+ add real FKs pointing at `plans` / `workspace_types` /
+--      `workspace_statuses` -- from that point on, rollback requires dropping
+--      dependents first.
 --
 -- Idempotency / transaction note:
 --   MySQL/InnoDB DDL statements (CREATE TABLE, ALTER TABLE) each cause an
@@ -133,7 +157,7 @@ CREATE TABLE IF NOT EXISTS plans (
     code                    VARCHAR(60) NOT NULL,              -- 'free', 'starter', 'growth', 'enterprise'
     name                    VARCHAR(100) NOT NULL,
     max_channel_accounts    INT UNSIGNED NOT NULL DEFAULT 1,
-    max_employees           INT UNSIGNED NOT NULL DEFAULT 5,
+    max_users               INT UNSIGNED NOT NULL DEFAULT 5,
     max_ai_agents           INT UNSIGNED NOT NULL DEFAULT 0,
     monthly_price_cents     INT UNSIGNED NOT NULL DEFAULT 0,
     yearly_price_cents      INT UNSIGNED NOT NULL DEFAULT 0,
@@ -174,4 +198,43 @@ CREATE TABLE IF NOT EXISTS features (
     updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
     CONSTRAINT uq_features_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  COMMENT='Feature-flag catalog (e.g. ai_auto_reply, broadcasts, api_access, departments) used to gate functionality per plan/company in 0014_billing.sql.';
+  COMMENT='Feature-flag catalog (e.g. ai_auto_reply, broadcasts, api_access, departments) used to gate functionality per plan/workspace in 0014_billing.sql.';
+
+-- -----------------------------------------------------------------------------
+-- workspace_types: lookup table for the kind of tenant a workspace represents
+-- (Individual, Team, Company, Organization). Deliberately a table, not an ENUM,
+-- so each type can later carry its own metadata (e.g. default_max_users,
+-- default_plan_id) without requiring a schema change -- same pattern as
+-- `channels`/`providers`/`plans` above. Referenced by workspaces.type_id (0002).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS workspace_types (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    code                VARCHAR(30) NOT NULL,              -- 'individual', 'team', 'company', 'organization'
+    name                VARCHAR(100) NOT NULL,
+    description         VARCHAR(255) NULL,
+    default_max_users   INT UNSIGNED NULL,                  -- optional soft default; plans still govern hard limits
+    is_active           TINYINT(1) NOT NULL DEFAULT 1,
+    created_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
+    updated_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    CONSTRAINT uq_workspace_types_code UNIQUE (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Lookup catalog of workspace tenant kinds (Individual, Team, Company, Organization). Referenced by workspaces.type_id; same architecture serves all four with no structural differences.';
+
+-- -----------------------------------------------------------------------------
+-- workspace_statuses: lookup table for workspace lifecycle state (Active,
+-- Trial, Pending, Suspended, Archived). A table (not an ENUM) so future
+-- billing/subscription logic (0014_billing.sql) can attach behavior to a
+-- status (e.g. blocks_login, is_billable) without a schema change.
+-- Referenced by workspaces.status_id (0002).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS workspace_statuses (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    code            VARCHAR(30) NOT NULL,              -- 'active', 'trial', 'pending', 'suspended', 'archived'
+    name            VARCHAR(100) NOT NULL,
+    description     VARCHAR(255) NULL,
+    blocks_login    TINYINT(1) NOT NULL DEFAULT 0,      -- e.g. 'suspended'/'archived' may block member login in future auth checks
+    created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    CONSTRAINT uq_workspace_statuses_code UNIQUE (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Lookup catalog of workspace lifecycle statuses (Active, Trial, Pending, Suspended, Archived). Referenced by workspaces.status_id; integrates with future billing/subscription management (0014_billing.sql).';
