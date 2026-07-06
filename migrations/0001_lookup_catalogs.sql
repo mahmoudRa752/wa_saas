@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS channels (
     name            VARCHAR(100) NOT NULL,
     is_active       TINYINT(1) NOT NULL DEFAULT 1,
     created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_channels_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Static catalog of supported communication channel types (WhatsApp, Telegram, Instagram, Messenger, Email, ...). Company-independent; referenced by providers, channel_accounts, conversations, messages.';
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS providers (
     supports_channel_id BIGINT UNSIGNED NULL,               -- primary channel this provider serves (nullable; some providers, e.g. future email SMTP relays, may serve none directly)
     is_active           TINYINT(1) NOT NULL DEFAULT 1,
     created_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_providers_code UNIQUE (code),
     KEY idx_providers_supports_channel_id (supports_channel_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS plans (
     currency                CHAR(3) NOT NULL DEFAULT 'USD',
     is_active               TINYINT(1) NOT NULL DEFAULT 1,
     created_at              DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at              DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at              DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_plans_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Billing plan tiers (Free, Starter, Growth, Enterprise) defining usage limits and pricing. Referenced by companies.plan_id.';
@@ -179,7 +179,7 @@ CREATE TABLE IF NOT EXISTS permissions (
     slug            VARCHAR(150) NOT NULL,             -- e.g. 'conversations.view', 'channel_accounts.manage'
     description     VARCHAR(255) NULL,
     created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_permissions_slug UNIQUE (slug)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Fine-grained RBAC permission catalog (e.g. conversations.view, channel_accounts.manage). Assigned to roles via role_permissions (0003).';
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS features (
     name            VARCHAR(150) NOT NULL,
     description     VARCHAR(255) NULL,
     created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_features_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Feature-flag catalog (e.g. ai_auto_reply, broadcasts, api_access, departments) used to gate functionality per plan/workspace in 0014_billing.sql.';
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS workspace_types (
     default_max_users   INT UNSIGNED NULL,                  -- optional soft default; plans still govern hard limits
     is_active           TINYINT(1) NOT NULL DEFAULT 1,
     created_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_workspace_types_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Lookup catalog of workspace tenant kinds (Individual, Team, Company, Organization). Referenced by workspaces.type_id; same architecture serves all four with no structural differences.';
@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS workspace_statuses (
     description     VARCHAR(255) NULL,
     blocks_login    TINYINT(1) NOT NULL DEFAULT 0,      -- e.g. 'suspended'/'archived' may block member login in future auth checks
     created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_workspace_statuses_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Lookup catalog of workspace lifecycle statuses (Active, Trial, Pending, Suspended, Archived). Referenced by workspaces.status_id; integrates with future billing/subscription management (0014_billing.sql). New workspaces default to the Pending status (Sprint 1 Product Backlog, Feature A3/B1).';
@@ -256,7 +256,7 @@ CREATE TABLE IF NOT EXISTS workspace_member_statuses (
     name            VARCHAR(100) NOT NULL,
     description     VARCHAR(255) NULL,
     created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_workspace_member_statuses_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Lookup catalog of workspace membership statuses (Active, Suspended). Referenced by workspace_members.status_id; deliberately narrower than workspace_statuses -- invitations (pre-membership) are tracked separately in workspace_invitations (0003).';

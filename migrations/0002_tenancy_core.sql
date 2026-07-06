@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS workspaces (
     plan_id         BIGINT UNSIGNED NULL,                -- FK -> plans (0001); nullable until a plan is assigned/onboarding completes
     timezone        VARCHAR(64) NOT NULL DEFAULT 'UTC',  -- IANA tz name; all stored timestamps remain UTC regardless (standard #9)
     created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     deleted_at      DATETIME NULL,                      -- soft-delete: a workspace can be deactivated/closed without losing history
     CONSTRAINT uq_workspaces_uuid UNIQUE (uuid),
     CONSTRAINT uq_workspaces_slug UNIQUE (slug),
@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS workspace_settings (
     branding_json           JSON NULL,                  -- logo/colors for future customer-facing widgets
     allow_private_mode      TINYINT(1) NOT NULL DEFAULT 1, -- workspace-level GOVERNANCE switch: may members opt their own membership into Private visibility at all? Distinct from workspace_members.privacy_mode below, which is the per-member STATE. A compliance-sensitive workspace can set this to 0 to force full admin visibility for every member, regardless of individual privacy_mode values (enforced at the application layer).
     created_at              DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at              DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at              DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     CONSTRAINT uq_workspace_settings_workspace_id UNIQUE (workspace_id),
     CONSTRAINT fk_workspace_settings_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS users (
     email_verified_at   DATETIME NULL,
     last_login_at       DATETIME NULL,
     created_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at          DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     deleted_at          DATETIME NULL,                  -- soft-delete: preserves FK history in messages/audit trails after account closure
     CONSTRAINT uq_users_uuid UNIQUE (uuid),
     CONSTRAINT uq_users_email UNIQUE (email),
@@ -198,15 +198,18 @@ CREATE TABLE IF NOT EXISTS workspace_members (
     invited_by_user_id BIGINT UNSIGNED NULL,            -- who invited this member; NULL for the first/self-registered member of a workspace
     invited_at      DATETIME NULL,
     joined_at       DATETIME NULL,                       -- NULL while an invite is pending acceptance
-    is_active       TINYINT(1) NOT NULL DEFAULT 1,        -- membership can be deactivated (e.g. suspended) without deleting history
+    status_id       BIGINT UNSIGNED NOT NULL,             -- FK -> workspace_member_statuses (0001): active/suspended; replaces a plain boolean so future states (e.g. "on_leave") don't require a schema change
+    last_active_at  DATETIME NULL,                        -- last time this member was seen active in this workspace; used for engagement/audit views, not for authorization
     created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
-    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()), -- NOTE: no automatic ON UPDATE clause: MySQL/MariaDB only permit CURRENT_TIMESTAMP for that, never an arbitrary function. Standard #7 forbids CURRENT_TIMESTAMP (server-local-timezone-dependent). The Service layer MUST explicitly set updated_at = UTC_TIMESTAMP() on every UPDATE statement (permanent engineering rule).
     deleted_at      DATETIME NULL,                        -- soft-delete: member removed from workspace, but referenced messages/conversations keep their history intact
     CONSTRAINT uq_workspace_members_workspace_user UNIQUE (workspace_id, user_id),
     KEY idx_workspace_members_user_id (user_id),
+    KEY idx_workspace_members_status_id (status_id),
     KEY idx_workspace_members_deleted_at (deleted_at),
     CONSTRAINT fk_workspace_members_workspace FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
     CONSTRAINT fk_workspace_members_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-    CONSTRAINT fk_workspace_members_invited_by FOREIGN KEY (invited_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+    CONSTRAINT fk_workspace_members_invited_by FOREIGN KEY (invited_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_workspace_members_status FOREIGN KEY (status_id) REFERENCES workspace_member_statuses(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  COMMENT='Bridge table: which users belong to which workspaces, plus membership-level metadata (invite trail, privacy mode). Role/permission assignment lives separately in workspace_member_roles (0003) so one membership can hold multiple roles.';
+  COMMENT='Bridge table: which users belong to which workspaces, plus membership-level metadata (invite trail, privacy mode, lifecycle status). Role/permission assignment lives separately in workspace_member_roles (0003) so one membership can hold multiple roles.';
