@@ -237,4 +237,26 @@ CREATE TABLE IF NOT EXISTS workspace_statuses (
     updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
     CONSTRAINT uq_workspace_statuses_code UNIQUE (code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  COMMENT='Lookup catalog of workspace lifecycle statuses (Active, Trial, Pending, Suspended, Archived). Referenced by workspaces.status_id; integrates with future billing/subscription management (0014_billing.sql).';
+  COMMENT='Lookup catalog of workspace lifecycle statuses (Active, Trial, Pending, Suspended, Archived). Referenced by workspaces.status_id; integrates with future billing/subscription management (0014_billing.sql). New workspaces default to the Pending status (Sprint 1 Product Backlog, Feature A3/B1).';
+
+-- -----------------------------------------------------------------------------
+-- workspace_member_statuses: lookup table for a membership's standing within a
+-- workspace (Active, Suspended). Deliberately narrower than workspace_statuses
+-- above -- there is no 'Invited'/'Pending' state here, because an invitation
+-- that has not yet been accepted has no workspace_members row at all (see
+-- workspace_invitations, 0003); this catalog only covers the lifecycle of a
+-- membership that already exists. Replaces the earlier boolean
+-- `workspace_members.is_active` design so status can carry future metadata
+-- (e.g. suspension reason display text) without a schema change. Referenced by
+-- workspace_members.status_id (0002).
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS workspace_member_statuses (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    code            VARCHAR(30) NOT NULL,              -- 'active', 'suspended'
+    name            VARCHAR(100) NOT NULL,
+    description     VARCHAR(255) NULL,
+    created_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
+    updated_at      DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()) ON UPDATE UTC_TIMESTAMP(),
+    CONSTRAINT uq_workspace_member_statuses_code UNIQUE (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Lookup catalog of workspace membership statuses (Active, Suspended). Referenced by workspace_members.status_id; deliberately narrower than workspace_statuses -- invitations (pre-membership) are tracked separately in workspace_invitations (0003).';
