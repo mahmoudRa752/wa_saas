@@ -4,6 +4,12 @@
 // ==========================================
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Conversation/Conversation.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationRepository.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationService.php');
+
+use Core\Conversation\ConversationRepository;
+use Core\Conversation\ConversationService;
 
 header('Content-Type: application/json');
 
@@ -70,19 +76,16 @@ if (!$numResult) {
 $phoneNumberId = $numResult['phone_number_id'];
 $accessToken   = WHATSAPP_ACCESS_TOKEN;
 
-// 2. جلب رقم هاتف العميل من المحادثة الحالية
-$convQuery = $conn->prepare("SELECT contact_number FROM conversations WHERE id = ? AND company_id = ? LIMIT 1");
-$convQuery->bind_param('ii', $conversationId, $companyId);
-$convQuery->execute();
-$conv = $convQuery->get_result()->fetch_assoc();
-$convQuery->close();
+// 2. جلب رقم هاتف العميل من المحادثة الحالية (via ConversationService)
+$convService = new ConversationService(new ConversationRepository($conn));
+$conv        = $convService->getForCompany($conversationId, $companyId);
 
 if (!$conv) {
     echo json_encode(['error' => 'Conversation not found']);
     exit;
 }
 
-$to = $conv['contact_number'];
+$to = $conv->contactNumber;
 $filePath = null;
 
 // 3. معالجة المرفقات (إن وجدت)
@@ -159,11 +162,8 @@ $insStmt->execute();
 $newMsgId = $insStmt->insert_id;
 $insStmt->close();
 
-// تحديث وقت آخر رسالة في المحادثة
-$upd = $conn->prepare("UPDATE conversations SET last_message_at = NOW() WHERE id = ?");
-$upd->bind_param('i', $conversationId);
-$upd->execute();
-$upd->close();
+// تحديث وقت آخر رسالة في المحادثة (via ConversationService)
+$convService->touch($conversationId);
 
 echo json_encode([
     'success'       => true,

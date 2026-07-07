@@ -1,6 +1,12 @@
 <?php
 // ملف مستقل تماماً لاستقبال بيانات Meta (Standalone)
 require_once("../config/db.php");
+require_once("../core/Conversation/Conversation.php");
+require_once("../core/Conversation/ConversationRepository.php");
+require_once("../core/Conversation/ConversationService.php");
+
+use Core\Conversation\ConversationRepository;
+use Core\Conversation\ConversationService;
 
 // 1. مرحلة التحقق المبدئي من فيسبوك (Webhook Verification Challenge)
 // يتم استدعاء هذا الجزء بطلب GET عند ربط الرابط لأول مرة في Meta Dashboard
@@ -63,24 +69,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($result) {
                 $companyId = (int)$result['company_id'];
 
-                // 1. التحقق من وجود محادثة سابقة أو إنشائها لضمان الـ Multi-Tenancy
-                $convStmt = $conn->prepare("
-                    INSERT INTO conversations (company_id, contact_number, last_message_at) 
-                    VALUES (?, ?, NOW()) 
-                    ON DUPLICATE KEY UPDATE last_message_at = NOW()
-                ");
-                $convStmt->bind_param("is", $companyId, $fromNumber);
-                $convStmt->execute();
-                $convStmt->close();
+                // Resolve conversation via ConversationService (find or create)
+                $convService = new ConversationService(new ConversationRepository($conn));
+                $convId      = $convService->findOrCreate($companyId, $fromNumber);
 
-                // جلب الـ ID الخاص بالمحادثة الحالية
-                $getConv = $conn->prepare("SELECT id FROM conversations WHERE company_id = ? AND contact_number = ? LIMIT 1");
-                $getConv->bind_param("is", $companyId, $fromNumber);
-                $getConv->execute();
-                $convId = (int)$getConv->get_result()->fetch_assoc()['id'];
-                $getConv->close();
-
-                // 2. إدخال الرسالة الواردة في جدول الشات الحي باتجاه 'in'
+                // إدخال الرسالة الواردة في جدول الشات الحي باتجاه 'in'
                 $msgStmt = $conn->prepare("
                     INSERT INTO chat_messages (conversation_id, user_id, direction, body, sent_at) 
                     VALUES (?, NULL, 'in', ?, NOW())
@@ -88,6 +81,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msgStmt->bind_param("is", $convId, $msgBody);
                 $msgStmt->execute();
                 $msgStmt->close();
+
+                $convService->touch($convId);
             }
         }
     }

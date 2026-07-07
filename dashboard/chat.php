@@ -1,143 +1,54 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Conversation/Conversation.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationRepository.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationService.php');
+
+use Core\Conversation\ConversationRepository;
+use Core\Conversation\ConversationService;
+
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
     exit;
 }
-$companyId = (int) $_SESSION['company_id'];
-$role      = $_SESSION['role'] ?? '';
-$userId    = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
-$isAdmin   = ($role === 'admin');
 
-/*
- * ── ملاحظة هامة قبل التشغيل (تنفيذ لمرة واحدة على قاعدة البيانات) ──
- * حتى تعمل عزلة المحادثات (كل موظف يرى محادثاته فقط) نحتاج عمود يحدد
- * "من الذي أنشأ المحادثة" داخل جدول conversations. إن لم يكن موجوداً
- * نفّذ الاستعلام التالي مرة واحدة:
- *
- *   ALTER TABLE conversations ADD COLUMN created_by INT NULL;
- *
- * جدول chat_messages بالفعل يحتوي على عمود user_id (نراه مستخدَماً في
- * جلب اسم المرسل عبر JOIN مع users)، وهو ما نعتمد عليه أيضاً في شرط
- * "شارك بإرسال/استقبال رسالة داخل المحادثة".
- */
+$companyId    = (int) $_SESSION['company_id'];
+$role         = $_SESSION['role'] ?? '';
+$userId       = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
+$isAdmin      = ($role === 'admin');
+// created_by confirmed present in live DB (schema audit 2025). No runtime ALTER needed.
+$hasCreatedBy = true;
 
 /**
- * يتحقق (ويُنشئ عند الإمكان) عمود conversations.created_by تلقائياً،
- * حتى لا يتعطل الكود بخطأ Fatal إن لم تُنفَّذ عملية الترحيل يدوياً بعد.
- * النتيجة تُخزَّن في الجلسة لتفادي فحص information_schema في كل طلب.
- */
-function ensureCreatedByColumn(mysqli $conn): bool
-{
-    if (isset($_SESSION['_has_created_by_col'])) {
-        return (bool) $_SESSION['_has_created_by_col'];
-    }
-
-    $has = false;
-    $chk = $conn->prepare(
-        "SELECT 1 FROM information_schema.columns
-         WHERE table_schema = DATABASE() AND table_name = 'conversations' AND column_name = 'created_by'
-         LIMIT 1"
-    );
-    if ($chk) {
-        $chk->execute();
-        $has = (bool) $chk->get_result()->fetch_assoc();
-        $chk->close();
-    }
-
-    if (!$has) {
-        // نحاول إضافة العمود تلقائياً؛ إن فشلت الصلاحيات نستمر بدونه بأمان.
-        try {
-            $conn->query("ALTER TABLE conversations ADD COLUMN created_by INT NULL");
-            $has = true;
-        } catch (\Throwable $e) {
-            $has = false; // سنعتمد فقط على chat_messages.user_id للعزل مؤقتاً
-        }
-    }
-
-    // نعمّر (backfill) المحادثات القديمة مرة واحدة فقط لكل جلسة، سواء كان
-    // العمود موجوداً من قبل أو أُضيف الآن للتو، حتى لا يفقد أي موظف الوصول
-    // لمحادثة كان يستخدمها فعلاً قبل تفعيل ميزة العزل.
-    if ($has && empty($_SESSION['_created_by_backfilled'])) {
-        backfillCreatedBy($conn);
-        $_SESSION['_created_by_backfilled'] = true;
-    }
-
-    $_SESSION['_has_created_by_col'] = $has;
-    return $has;
-}
-
-/**
- * تعمير (Backfill) عمود created_by لمرة واحدة للمحادثات القديمة الموجودة
- * قبل إضافة العمود، حتى لا "تختفي" فجأة محادثات كان الموظف يستخدمها فعلاً.
- * يعتمد على أول user_id ظهر في رسائل المحادثة (chat_messages).
- * آمن للتنفيذ أكثر من مرة (WHERE created_by IS NULL).
- */
-function backfillCreatedBy(mysqli $conn): void
-{
-    try {
-        $conn->query(
-            "UPDATE conversations c
-             LEFT JOIN (
-                 SELECT cm.conversation_id, MIN(cm.user_id) AS uid
-                 FROM chat_messages cm
-                 WHERE cm.user_id IS NOT NULL
-                 GROUP BY cm.conversation_id
-             ) t ON t.conversation_id = c.id
-             SET c.created_by = t.uid
-             WHERE c.created_by IS NULL AND t.uid IS NOT NULL"
-        );
-    } catch (\Throwable $e) {
-        // تجاهل بأمان: التعمير تحسين اختياري ولا يجب أن يوقف تحميل الصفحة
-    }
-}
-
-/**
- * يبني جزء WHERE + المتغيرات اللازمة لعزل المحادثات حسب الدور.
- * - admin: يرى كل محادثات الشركة (بدون قيد إضافي).
- * - موظف: يرى فقط المحادثة التي أنشأها (created_by) أو شارك فيها
- *   عبر رسالة (chat_messages.user_id) - باستخدام Subquery داخل WHERE
- *   حتى لا نستخدم JOIN يخفي المحادثات الجديدة/الفارغة.
- * - إذا لم يكن عمود created_by متاحاً بعد (قبل الترحيل)، يُستخدم فقط
- *   شرط المشاركة عبر chat_messages حتى لا يتعطل الاستعلام.
- *
- * يعيد مصفوفة: ['sql' => "...", 'types' => "...", 'params' => [...]]
+ * Builds the WHERE clause fragment for conversation isolation by role.
+ * Admin: sees all company conversations.
+ * Employee: sees only conversations they created (created_by) or participated in (chat_messages.user_id).
  */
 function buildIsolationClause(bool $isAdmin, int $userId, bool $hasCreatedBy = true): array
 {
     if ($isAdmin) {
         return ['sql' => '', 'types' => '', 'params' => []];
     }
-
     if ($hasCreatedBy) {
         $sql = " AND (c.created_by = ? OR c.id IN (
-                    SELECT DISTINCT cm.conversation_id
-                    FROM chat_messages cm
-                    WHERE cm.user_id = ?
+                    SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
                 )) ";
         return ['sql' => $sql, 'types' => 'ii', 'params' => [$userId, $userId]];
     }
-
-    // بدون عمود created_by: نعزل فقط بالمحادثات التي شارك بها المستخدم برسالة.
     $sql = " AND c.id IN (
-                SELECT DISTINCT cm.conversation_id
-                FROM chat_messages cm
-                WHERE cm.user_id = ?
+                SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
             ) ";
     return ['sql' => $sql, 'types' => 'i', 'params' => [$userId]];
 }
 
-/**
- * يتحقق أن محادثة معينة مسموح للمستخدم الحالي بالتعامل معها
- * (تُستخدم قبل تنفيذ عمليات: تثبيت/تعديل/حذف/تعديل رسالة/حذف رسالة).
- */
+/** Checks whether the current user may access a given conversation. */
 function userCanAccessConversation(mysqli $conn, int $convId, int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true): bool
 {
-    $iso = buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
-    $sql = "SELECT c.id FROM conversations c WHERE c.id = ? AND c.company_id = ?" . $iso['sql'] . " LIMIT 1";
-    $stmt = $conn->prepare($sql);
-    $types = 'ii' . $iso['types'];
+    $iso    = buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
+    $sql    = "SELECT c.id FROM conversations c WHERE c.id = ? AND c.company_id = ?" . $iso['sql'] . " LIMIT 1";
+    $stmt   = $conn->prepare($sql);
+    $types  = 'ii' . $iso['types'];
     $params = array_merge([$convId, $companyId], $iso['params']);
     $stmt->bind_param($types, ...$params);
     $stmt->execute();
@@ -146,42 +57,18 @@ function userCanAccessConversation(mysqli $conn, int $convId, int $companyId, bo
     return $ok;
 }
 
-// يُفحص/يُنشأ مرة واحدة لكل جلسة: هل عمود conversations.created_by موجود؟
-$hasCreatedBy = ensureCreatedByColumn($conn);
-
-// ── 1. معالجة العمليات (تثبيت، حذف، تعديل المحادثات والرسائل) ──
+// ── 1. Handle POST actions ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
 
-    // إنشاء محادثة جديدة
+    // إنشاء محادثة جديدة (via ConversationService)
     if ($action === 'new_chat') {
         $newNumber = trim($_POST['new_number']);
         if (!empty($newNumber)) {
-            $checkStmt = $conn->prepare("SELECT id FROM conversations WHERE company_id = ? AND contact_number = ? LIMIT 1");
-            $checkStmt->bind_param('is', $companyId, $newNumber);
-            $checkStmt->execute();
-            $res = $checkStmt->get_result()->fetch_assoc();
-            $checkStmt->close();
-            if ($res) {
-                header("Location: chat.php?conv=" . $res['id']);
-                exit;
-            } else {
-                $creatorId = $userId; // من أنشأ المحادثة (يُستخدم في عزل الموظفين)
-                if ($hasCreatedBy) {
-                    $insStmt = $conn->prepare("INSERT INTO conversations (company_id, contact_number, created_by, last_message_at) VALUES (?, ?, ?, NOW())");
-                    $insStmt->bind_param('isi', $companyId, $newNumber, $creatorId);
-                } else {
-                    // عمود created_by غير متاح بعد: نُنشئ المحادثة بدونه، وستُحسب
-                    // ملكية الموظف لها اعتماداً على أول رسالة يرسلها بداخلها.
-                    $insStmt = $conn->prepare("INSERT INTO conversations (company_id, contact_number, last_message_at) VALUES (?, ?, NOW())");
-                    $insStmt->bind_param('is', $companyId, $newNumber);
-                }
-                $insStmt->execute();
-                $newId = $insStmt->insert_id;
-                $insStmt->close();
-                header("Location: chat.php?conv=" . $newId);
-                exit;
-            }
+            $convService = new ConversationService(new ConversationRepository($conn));
+            $newId       = $convService->findOrCreate($companyId, $newNumber, $userId);
+            header("Location: chat.php?conv=" . $newId);
+            exit;
         }
     }
 
