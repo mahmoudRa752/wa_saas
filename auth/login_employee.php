@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . "/../core/Session.php";
+Session::start();
 require_once("../config/db.php");
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -18,10 +19,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         if (password_verify($password, $user['password'])) {
 
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['company_id'] = $user['company_id'];
-            $_SESSION['user_name'] = $user['name'];
-            $_SESSION['role'] = "employee";
+            Session::set('user_id', $user['id']);
+            Session::set('company_id', $user['company_id']);
+            Session::set('user_name', $user['name']);
+            Session::set('role', "employee");
 
             header("Location: ../dashboard/index.php");
             exit;

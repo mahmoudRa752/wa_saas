@@ -1,5 +1,6 @@
 <?php
-session_start();
+require_once __DIR__ . "/../core/Session.php";
+Session::start();
 require_once("../config/db.php");
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -18,9 +19,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if ($result->num_rows > 0) {
             $company = $result->fetch_assoc();
             if (password_verify($password, $company['password'])) {
-                $_SESSION['company_id']   = $company['id'];
-                $_SESSION['company_name'] = $company['name'];
-                $_SESSION['role']         = "admin";
+                Session::set('company_id', $company['id']);
+                Session::set('company_name', $company['name']);
+                Session::set('role', "admin");
                 header("Location: ../dashboard/index.php");
                 exit;
             } else {
@@ -45,11 +46,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         if ($result->num_rows > 0) {
             $user = $result->fetch_assoc();
             if (password_verify($password, $user['password'])) {
-                $_SESSION['user_id']      = $user['id'];
-                $_SESSION['user_name']    = $user['name'];
-                $_SESSION['company_id']   = $user['company_id'];
-                $_SESSION['company_name'] = $user['company_name'];
-                $_SESSION['role']         = "employee";
+                Session::set('user_id', $user['id']);
+                Session::set('user_name', $user['name']);
+                Session::set('company_id', $user['company_id']);
+                Session::set('company_name', $user['company_name']);
+                Session::set('role', "employee");
                 header("Location: ../dashboard/index.php");
                 exit;
             } else {
