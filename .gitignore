@@ -9,3 +9,8 @@
 
 .DS_Store
 Thumbs.db
+/uploads/*.pdf
+/uploads/*.doc
+/uploads/*.docx
+/uploads/*.xlsx
+/uploads/*.csv

@@ -247,7 +247,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->close();
 
             if ($wamid) {
-                $accessToken = "EAAZBGtwMbSu0BR45Cvl2BYZCkupVr6DgwytZAt7sXfuBdyQy8bmlyLfKOuVmERuGXZCjtmt7wkgRKRcPUWLajhIrhi6ZCSU50SBzfjUsEw1aIZCSqwbhYIkdTEDd2WA0OZBDH4mYjoaaoQgxjTZCAy0y9akeZAZAwQgcUxkYxuaE2k3uCflKVz6wmZB33Twk5VoBzwaY8kkaBStt8iX5ZA1BCV9XZBb1G1ip7RXMZCp7dE6ZC2v8MvL3rxK6ZCoHtQi6njFGHRrV98rC4s4vwc9OP2m1nbDl";
+                $accessToken = "EAAZBGtwMbSu0BRxJrTffY3W0l3G3h6DVnGL3ZAkpOHemZC4VpKb937MrA112fy5VdrNCeWiyTqCZAACzoCoA7M3Pon9ZBP5syGIHBi6JmLOKEhZAGB06sxEZBD9yW8y0eVMAKzp3iwi4e7uq6m7rXN3ZBI9sZBDQNaXhCyq7A889DZA0BlHvZAZBQw3U0FzNrmKFg24g8Qx6u20ZAcfmdUwZB5Ekt7iWIpO5yceRFH1hocqmG9ZApM9cX1UFElPmXfltYutkk7ELeJ9anO0Mc60i2EqxBlt2gZDZD";
                 $phoneNumberId = "1165715256628007";
                 $url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
                 $payload = [
