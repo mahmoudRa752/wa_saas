@@ -2,7 +2,9 @@
 session_start();
 require_once("../config/db.php");
 require_once("../vendor/autoload.php");
+require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
 
+use Core\Services\WhatsAppService;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 if (!isset($_SESSION['company_id'])) {
@@ -12,6 +14,7 @@ if (!isset($_SESSION['company_id'])) {
 
 $company_id = $_SESSION['company_id'];
 $role = $_SESSION['role'];
+$whatsAppService = new WhatsAppService();
 
 // ✅ جلب limit الشهري
 $stmt = $conn->prepare("
@@ -96,54 +99,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     $messageText = str_replace("{" . trim($columnName) . "}", $value, $messageText);
                 }
 
-                $url = "https://graph.facebook.com/v19.0/$phoneNumberId/messages";
-
-                // ✅ محاولة إرسال رسالة نصية مخصصة أولاً
-                $payload = [
-                        "messaging_product" => "whatsapp",
-                        "to" => $recipient,
-                        "type" => "text",
-                        "text" => [
-                                "body" => $messageText
-                        ]
-                ];
-
-                $ch = curl_init($url);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                        "Authorization: Bearer $accessToken",
-                        "Content-Type: application/json"
-                ]);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-                $response = curl_exec($ch);
-                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
+                $response = $whatsAppService->sendText($phoneNumberId, $recipient, $messageText, $accessToken);
+                $httpCode = $response['httpCode'];
 
                 // ✅ لو فشل بسبب عدم وجود نافذة محادثة نشطة (Session) -> نستخدم Template كخيار بديل تلقائي
                 if ($httpCode != 200) {
-                    $payload = [
-                            "messaging_product" => "whatsapp",
-                            "to" => $recipient,
-                            "type" => "template",
-                            "template" => [
-                                    "name" => "hello_world",
-                                    "language" => ["code" => "en_US"]
-                            ]
-                    ];
-
-                    $ch = curl_init($url);
-                    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                            "Authorization: Bearer $accessToken",
-                            "Content-Type: application/json"
-                    ]);
-                    curl_setopt($ch, CURLOPT_POST, true);
-                    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                    curl_exec($ch);
-                    curl_close($ch);
-
+                    $whatsAppService->sendTemplate($phoneNumberId, $recipient, $accessToken);
                     $messageText = "[Template: hello_world]";
                 }
 

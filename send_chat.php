@@ -4,6 +4,9 @@
 // ==========================================
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/core/Services/WhatsAppService.php');
+
+use Core\Services\WhatsAppService;
 
 header('Content-Type: application/json');
 
@@ -84,6 +87,7 @@ if (!$conv) {
 
 $to = $conv['contact_number'];
 $filePath = null;
+$whatsAppService = new WhatsAppService();
 
 // 3. معالجة المرفقات (إن وجدت)
 if ($messageType !== 'text' && isset($_FILES['attachment']) && $_FILES['attachment']['error'] === UPLOAD_ERR_OK) {
@@ -130,17 +134,9 @@ if ($messageType === 'text') {
     }
 }
 
-$ch = curl_init($url);
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    "Authorization: Bearer " . $accessToken,
-    "Content-Type: application/json"
-]);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-$response = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
+$sendResult = $whatsAppService->sendPayload($phoneNumberId, $payload, $accessToken);
+$response = $sendResult['response'];
+$httpCode = $sendResult['httpCode'];
 
 $resData = json_encode($response);
 $wamid = null;

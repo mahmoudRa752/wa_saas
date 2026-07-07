@@ -2,7 +2,9 @@
 session_start();
 require_once("../config/db.php");
 require_once("../vendor/autoload.php");
+require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
 
+use Core\Services\WhatsAppService;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 if (!isset($_SESSION['company_id'])) {
@@ -12,6 +14,7 @@ if (!isset($_SESSION['company_id'])) {
 
 $company_id = $_SESSION['company_id'];
 $role = $_SESSION['role'];
+$whatsAppService = new WhatsAppService();
 
 /* ===============================
    ✅ جلب limit الشهري
@@ -129,27 +132,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 function sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken){
 
     global $conn;
+    global $whatsAppService;
 
-    $url = "https://graph.facebook.com/v19.0/$phoneNumberId/messages";
-
-    $payload = [
-            "messaging_product" => "whatsapp",
-            "to" => $recipient,
-            "type" => "text",
-            "text" => ["body" => $message]
-    ];
-
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            "Authorization: Bearer $accessToken",
-            "Content-Type: application/json"
-    ]);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-    curl_exec($ch);
-    curl_close($ch);
+    $result = $whatsAppService->sendText($phoneNumberId, $recipient, $message, $accessToken);
 
     $stmt = $conn->prepare("INSERT INTO messages (user_id, recipient, message, status) VALUES (?, ?, ?, 'sent')");
     $stmt->bind_param("iss", $_SESSION['user_id'], $recipient, $message);
