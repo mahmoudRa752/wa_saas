@@ -36,3 +36,19 @@ CREATE INDEX idx_chat_messages_conv ON chat_messages(conversation_id, sent_at);
 
 -- Index لتسريع جلب محادثات شركة معينة
 CREATE INDEX idx_conversations_company ON conversations(company_id, last_message_at);
+
+-- جدول الملاحظات الداخلية للمحادثة (غير مرسلة إلى واتساب)
+CREATE TABLE IF NOT EXISTS conversation_notes (
+    id              INT AUTO_INCREMENT PRIMARY KEY,
+    company_id      INT NOT NULL,
+    conversation_id  INT NOT NULL,
+    body            TEXT NOT NULL,
+    created_by      INT DEFAULT NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    KEY company_id (company_id),
+    KEY conversation_id (conversation_id),
+    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+    FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);

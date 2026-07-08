@@ -8,10 +8,15 @@ require_once(__DIR__ . '/../core/TenantContext.php');
 require_once(__DIR__ . '/../core/SavedReply/SavedReply.php');
 require_once(__DIR__ . '/../core/SavedReply/SavedReplyRepository.php');
 require_once(__DIR__ . '/../core/SavedReply/SavedReplyService.php');
+require_once(__DIR__ . '/../core/ConversationNote/ConversationNote.php');
+require_once(__DIR__ . '/../core/ConversationNote/ConversationNoteRepository.php');
+require_once(__DIR__ . '/../core/ConversationNote/ConversationNoteService.php');
 require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
 
 use Core\Conversation\ConversationRepository;
 use Core\Conversation\ConversationService;
+use Core\ConversationNote\ConversationNoteRepository;
+use Core\ConversationNote\ConversationNoteService;
 use Core\SavedReply\SavedReplyRepository;
 use Core\SavedReply\SavedReplyService;
 use Core\Services\WhatsAppService;
@@ -31,6 +36,7 @@ $hasCreatedBy = true;
 
 $tenantContext = TenantContext::fromSession();
 $savedReplyService = new SavedReplyService(new SavedReplyRepository($conn));
+$conversationNoteService = new ConversationNoteService(new ConversationNoteRepository($conn));
 $conn->query("CREATE TABLE IF NOT EXISTS saved_replies (
     id INT AUTO_INCREMENT PRIMARY KEY,
     company_id INT NOT NULL,
@@ -41,6 +47,7 @@ $conn->query("CREATE TABLE IF NOT EXISTS saved_replies (
     KEY company_id (company_id)
 )");
 $savedReplies = $savedReplyService->list($tenantContext);
+$conversationNotes = [];
 
 /**
  * Builds the WHERE clause fragment for conversation isolation by role.
@@ -108,6 +115,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $savedReplyId = (int) ($_POST['saved_reply_id'] ?? 0);
         if ($savedReplyId > 0) {
             $savedReplyService->delete($tenantContext, $savedReplyId);
+        }
+        header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
+        exit;
+    }
+
+    if ($action === 'conversation_note_create') {
+        $noteBody = trim($_POST['conversation_note_body'] ?? '');
+        $convId = (int) ($_POST['conversation_id'] ?? 0);
+        if ($convId > 0 && $noteBody !== '' && userCanAccessConversation($conn, $convId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $conversationNoteService->create($tenantContext, $convId, $noteBody, $userId);
+        }
+        header("Location: chat.php?conv=" . $convId);
+        exit;
+    }
+
+    if ($action === 'conversation_note_update') {
+        $noteId = (int) ($_POST['conversation_note_id'] ?? 0);
+        $noteBody = trim($_POST['conversation_note_body'] ?? '');
+        if ($noteId > 0 && $noteBody !== '') {
+            $conversationNoteService->update($tenantContext, $noteId, $noteBody);
+        }
+        header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
+        exit;
+    }
+
+    if ($action === 'conversation_note_delete') {
+        $noteId = (int) ($_POST['conversation_note_id'] ?? 0);
+        if ($noteId > 0) {
+            $conversationNoteService->delete($tenantContext, $noteId);
         }
         header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
         exit;
@@ -271,6 +307,8 @@ if ($activeConvId > 0) {
         $msgStmt->execute();
         $initMessages = $msgStmt->get_result()->fetch_all(MYSQLI_ASSOC);
         $msgStmt->close();
+
+        $conversationNotes = $conversationNoteService->listForConversation($tenantContext, $activeConvId);
     } else {
         // المحادثة غير موجودة أو لا يملك الموظف صلاحية الوصول إليها
         $activeConvId = 0;
@@ -355,6 +393,14 @@ include("../layouts/header.php");
 .saved-reply-delete { border: none; background: #fee2e2; color: #b91c1c; border-radius: 999px; width: 22px; height: 22px; cursor: pointer; font-size: 12px; }
 .saved-reply-modal-body { display: flex; flex-direction: column; gap: 10px; }
 .saved-reply-modal-body input, .saved-reply-modal-body textarea { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+.notes-panel { padding: 10px 16px; background: #f8fafc; border-top: 1px solid #e2e8f0; }
+.notes-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #334155; }
+.notes-new-btn { border: none; background: #0f766e; color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.notes-list { display: flex; flex-direction: column; gap: 8px; }
+.note-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: #334155; }
+.note-item small { color: #64748b; display: block; margin-top: 4px; }
+.note-actions { display: flex; gap: 6px; margin-top: 6px; }
+.note-actions button { border: none; background: #f1f5f9; color: #334155; border-radius: 999px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
 </style>
 <div class="chat-wrapper">
     <div class="conv-list">
@@ -501,6 +547,32 @@ include("../layouts/header.php");
                     <?php endif; ?>
                 </div>
             </div>
+            <div class="notes-panel">
+                <div class="notes-header">
+                    <span>Internal Notes</span>
+                    <button type="button" class="notes-new-btn" onclick="toggleModal('conversationNoteModal')">+ Add</button>
+                </div>
+                <div class="notes-list">
+                    <?php if (empty($conversationNotes)): ?>
+                        <span style="font-size:12px;color:#64748b;">No internal notes for this conversation yet.</span>
+                    <?php else: ?>
+                        <?php foreach ($conversationNotes as $note): ?>
+                            <div class="note-item">
+                                <div><?php echo nl2br(htmlspecialchars($note->body)); ?></div>
+                                <small>Added <?php echo htmlspecialchars($note->createdAt); ?></small>
+                                <div class="note-actions">
+                                    <button type="button" onclick="openNoteEditModal(<?php echo (int) $note->id; ?>, '<?php echo htmlspecialchars($note->body, ENT_QUOTES); ?>')">Edit</button>
+                                    <form method="POST" action="" onsubmit="return confirm('Delete this internal note?');" style="margin:0;display:inline;">
+                                        <input type="hidden" name="action" value="conversation_note_delete">
+                                        <input type="hidden" name="conversation_note_id" value="<?php echo (int) $note->id; ?>">
+                                        <button type="submit">Delete</button>
+                                    </form>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
             <div class="chat-input-area">
                 <div class="native-emoji-picker" id="nativeEmojiPicker">
                     <div class="emoji-picker-header">Emojis & Stickers</div>
@@ -585,6 +657,40 @@ include("../layouts/header.php");
     </div>
 </div>
 
+<div id="conversationNoteModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:24px; border-radius:12px; width:420px;">
+        <h5 style="margin-top:0; margin-bottom:14px; font-weight:600;">Add Internal Note</h5>
+        <form method="POST" action="">
+            <input type="hidden" name="action" value="conversation_note_create">
+            <input type="hidden" name="conversation_id" value="<?php echo (int) $activeConvId; ?>">
+            <div class="saved-reply-modal-body">
+                <textarea name="conversation_note_body" rows="5" placeholder="Write an internal note for this conversation" required></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+                <button type="button" onclick="toggleModal('conversationNoteModal')" style="padding:6px 12px; border-radius:6px; background:#eee; border:none;">Cancel</button>
+                <button type="submit" style="padding:6px 12px; border-radius:6px; background:#0f766e; color:#fff; border:none;">Save Note</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="conversationNoteEditModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:24px; border-radius:12px; width:420px;">
+        <h5 style="margin-top:0; margin-bottom:14px; font-weight:600;">Edit Internal Note</h5>
+        <form method="POST" action="">
+            <input type="hidden" name="action" value="conversation_note_update">
+            <input type="hidden" name="conversation_note_id" id="editNoteId">
+            <div class="saved-reply-modal-body">
+                <textarea name="conversation_note_body" id="editNoteBody" rows="5" required></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+                <button type="button" onclick="toggleModal('conversationNoteEditModal')" style="padding:6px 12px; border-radius:6px; background:#eee; border:none;">Cancel</button>
+                <button type="submit" style="padding:6px 12px; border-radius:6px; background:#0f766e; color:#fff; border:none;">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
 // ── سكربت عام: يعمل دائماً بغض النظر عن وجود محادثة نشطة ──
 function toggleDropdownMenu(event, id) {
@@ -620,6 +726,12 @@ function openEditMsgModal(id, currentText) {
     document.getElementById('editMsgId').value = id;
     document.getElementById('editMsgBodyInput').value = currentText;
     toggleModal('editMsgModal');
+}
+function openNoteEditModal(id, currentText) {
+    if (event) event.stopPropagation();
+    document.getElementById('editNoteId').value = id;
+    document.getElementById('editNoteBody').value = currentText;
+    toggleModal('conversationNoteEditModal');
 }
 function toggleModal(modalId) {
     const m = document.getElementById(modalId);
