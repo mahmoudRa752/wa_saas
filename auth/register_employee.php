@@ -1,6 +1,9 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Auth/AuthRepository.php');
+
+use Core\Auth\AuthRepository;
 
 // إذا كان المستخدم مسجل دخوله بالفعل، يتم توجيهه للـ Dashboard فوراً
 if (isset($_SESSION['company_id'])) {
@@ -14,6 +17,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $email = trim($_POST['email']);
     $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
     $company_code = trim($_POST['company_code']);
+    $authRepo = new AuthRepository($conn);
 
     // نبحث عن الشركة بالكود
     $stmt = $conn->prepare("SELECT id FROM companies WHERE company_code = ?");
@@ -26,12 +30,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $company = $result->fetch_assoc();
         $company_id = $company['id'];
 
-        $stmt = $conn->prepare("INSERT INTO users (company_id, name, email, password, role) VALUES (?, ?, ?, ?, 'employee')");
-        $stmt->bind_param("isss", $company_id, $name, $email, $password);
+        $newId = $authRepo->createEmployee($name, $email, $password, $company_id);
 
-        if ($stmt->execute()) {
+        if ($newId) {
 
-            $_SESSION['user_id'] = $stmt->insert_id;
+            $_SESSION['user_id'] = $newId;
             $_SESSION['company_id'] = $company_id;
             $_SESSION['user_name'] = $name;
             $_SESSION['role'] = "employee";

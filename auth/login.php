@@ -1,22 +1,22 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Auth/AuthRepository.php');
+
+use Core\Auth\AuthRepository;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     $email    = trim($_POST['email']);
     $password = $_POST['password'];
     $type     = $_POST['type'];
+    $authRepo = new AuthRepository($conn);
 
     if ($type === "company") {
 
-        $stmt = $conn->prepare("SELECT * FROM companies WHERE email = ?");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
+        $company = $authRepo->findCompanyByEmail($email);
 
-        if ($result->num_rows > 0) {
-            $company = $result->fetch_assoc();
+        if ($company) {
             if (password_verify($password, $company['password'])) {
                 $_SESSION['company_id']   = $company['id'];
                 $_SESSION['company_name'] = $company['name'];
@@ -32,18 +32,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     } else {
 
-        $stmt = $conn->prepare("
-            SELECT u.*, c.name as company_name
-            FROM users u
-            JOIN companies c ON u.company_id = c.id
-            WHERE u.email = ?
-        ");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
+        $user = $authRepo->findEmployeeByEmail($email);
 
-        if ($result->num_rows > 0) {
-            $user = $result->fetch_assoc();
+        if ($user) {
             if (password_verify($password, $user['password'])) {
                 $_SESSION['user_id']      = $user['id'];
                 $_SESSION['user_name']    = $user['name'];
