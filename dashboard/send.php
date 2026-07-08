@@ -3,7 +3,9 @@ session_start();
 require_once("../config/db.php");
 require_once("../vendor/autoload.php");
 require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
+require_once(__DIR__ . '/../core/Services/UsageService.php');
 
+use Core\Services\UsageService;
 use Core\Services\WhatsAppService;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
@@ -15,33 +17,10 @@ if (!isset($_SESSION['company_id'])) {
 $company_id = $_SESSION['company_id'];
 $role = $_SESSION['role'];
 $whatsAppService = new WhatsAppService();
-
-/* ===============================
-   ✅ جلب limit الشهري
-================================= */
-$stmt = $conn->prepare("
-    SELECT p.monthly_limit
-    FROM companies c
-    JOIN plans p ON c.plan_id = p.id
-    WHERE c.id = ?
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$limit = $stmt->get_result()->fetch_assoc()['monthly_limit'] ?? 0;
-
-/* ===============================
-   ✅ عدد الرسائل هذا الشهر
-================================= */
-$stmt = $conn->prepare("
-    SELECT COUNT(*) as total
-    FROM messages m
-    JOIN users u ON m.user_id = u.id
-    WHERE u.company_id = ?
-    AND MONTH(m.sent_at) = MONTH(CURRENT_DATE())
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$used = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$usageService = new UsageService($conn);
+$usage = $usageService->getMonthlyLimitAndUsage($company_id);
+$limit = $usage['limit'];
+$used = $usage['used'];
 
 /* ===============================
    ✅ جلب الموظفين (Admin فقط)

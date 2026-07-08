@@ -1,6 +1,9 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Services/UsageService.php');
+
+use Core\Services\UsageService;
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -8,6 +11,7 @@ if (!isset($_SESSION['company_id'])) {
 }
 
 $company_id = $_SESSION['company_id'];
+$usageService = new UsageService($conn);
 
 // إجمالي الرسائل
 $stmt = $conn->prepare("
@@ -21,17 +25,8 @@ $stmt->execute();
 $totalMessages = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
 
 // رسائل هذا الشهر
-$stmt = $conn->prepare("
-    SELECT COUNT(*) as total
-    FROM messages m
-    JOIN users u ON m.user_id = u.id
-    WHERE u.company_id = ?
-    AND MONTH(m.sent_at) = MONTH(CURRENT_DATE())
-    AND YEAR(m.sent_at) = YEAR(CURRENT_DATE())
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$monthlyMessages = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$usageSummary = $usageService->getSubscriptionUsageSummary($company_id);
+$monthlyMessages = $usageSummary['monthlyMessages'];
 
 // عدد الموظفين
 $stmt = $conn->prepare("SELECT COUNT(*) as total FROM users WHERE company_id = ?");
@@ -40,22 +35,10 @@ $stmt->execute();
 $totalEmployees = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
 
 // الاشتراك الحالي
-$stmt = $conn->prepare("
-    SELECT p.name, p.monthly_limit, s.end_date
-    FROM subscriptions s
-    JOIN plans p ON s.plan_id = p.id
-    WHERE s.company_id = ? AND s.status = 'active'
-    LIMIT 1
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$subscription = $stmt->get_result()->fetch_assoc();
-
-$planName = $subscription['name'] ?? 'No Plan';
-$limit    = $subscription['monthly_limit'] ?? 0;
-$endDate  = $subscription['end_date'] ?? null;
-
-$usagePercent = ($limit > 0) ? min(100, round(($monthlyMessages / $limit) * 100)) : 0;
+$planName = $usageSummary['planName'];
+$limit    = $usageSummary['limit'];
+$endDate  = $usageSummary['endDate'];
+$usagePercent = $usageSummary['usagePercent'];
 
 // آخر 5 رسائل
 $stmt = $conn->prepare("
