@@ -27,6 +27,20 @@ if (!isset($_SESSION['company_id'])) {
     exit;
 }
 
+function generateConversationNoteCsrfToken(): string
+{
+    if (empty($_SESSION['conversation_note_csrf'])) {
+        $_SESSION['conversation_note_csrf'] = bin2hex(random_bytes(32));
+    }
+
+    return $_SESSION['conversation_note_csrf'];
+}
+
+function validateConversationNoteCsrfToken(?string $token): bool
+{
+    return is_string($token) && hash_equals($_SESSION['conversation_note_csrf'] ?? '', $token);
+}
+
 $companyId    = (int) $_SESSION['company_id'];
 $role         = $_SESSION['role'] ?? '';
 $userId       = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
@@ -35,6 +49,7 @@ $isAdmin      = ($role === 'admin');
 $hasCreatedBy = true;
 
 $tenantContext = TenantContext::fromSession();
+$csrfToken = generateConversationNoteCsrfToken();
 $savedReplyService = new SavedReplyService(new SavedReplyRepository($conn));
 $conversationNoteService = new ConversationNoteService(new ConversationNoteRepository($conn));
 $conn->query("CREATE TABLE IF NOT EXISTS saved_replies (
@@ -121,6 +136,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($action === 'conversation_note_create') {
+        if (!validateConversationNoteCsrfToken($_POST['csrf_token'] ?? null)) {
+            http_response_code(403);
+            exit;
+        }
+
         $noteBody = trim($_POST['conversation_note_body'] ?? '');
         $convId = (int) ($_POST['conversation_id'] ?? 0);
         if ($convId > 0 && $noteBody !== '' && userCanAccessConversation($conn, $convId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
@@ -131,19 +151,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($action === 'conversation_note_update') {
+        if (!validateConversationNoteCsrfToken($_POST['csrf_token'] ?? null)) {
+            http_response_code(403);
+            exit;
+        }
+
         $noteId = (int) ($_POST['conversation_note_id'] ?? 0);
         $noteBody = trim($_POST['conversation_note_body'] ?? '');
         if ($noteId > 0 && $noteBody !== '') {
-            $conversationNoteService->update($tenantContext, $noteId, $noteBody);
+            $note = $conversationNoteService->getById($tenantContext, $noteId);
+            if ($note && userCanAccessConversation($conn, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+                $conversationNoteService->update($tenantContext, $noteId, $noteBody);
+            }
         }
         header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
         exit;
     }
 
     if ($action === 'conversation_note_delete') {
+        if (!validateConversationNoteCsrfToken($_POST['csrf_token'] ?? null)) {
+            http_response_code(403);
+            exit;
+        }
+
         $noteId = (int) ($_POST['conversation_note_id'] ?? 0);
         if ($noteId > 0) {
-            $conversationNoteService->delete($tenantContext, $noteId);
+            $note = $conversationNoteService->getById($tenantContext, $noteId);
+            if ($note && userCanAccessConversation($conn, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+                $conversationNoteService->delete($tenantContext, $noteId);
+            }
         }
         header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
         exit;
@@ -564,6 +600,7 @@ include("../layouts/header.php");
                                     <button type="button" onclick="openNoteEditModal(<?php echo (int) $note->id; ?>, '<?php echo htmlspecialchars($note->body, ENT_QUOTES); ?>')">Edit</button>
                                     <form method="POST" action="" onsubmit="return confirm('Delete this internal note?');" style="margin:0;display:inline;">
                                         <input type="hidden" name="action" value="conversation_note_delete">
+                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
                                         <input type="hidden" name="conversation_note_id" value="<?php echo (int) $note->id; ?>">
                                         <button type="submit">Delete</button>
                                     </form>
@@ -662,6 +699,7 @@ include("../layouts/header.php");
         <h5 style="margin-top:0; margin-bottom:14px; font-weight:600;">Add Internal Note</h5>
         <form method="POST" action="">
             <input type="hidden" name="action" value="conversation_note_create">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
             <input type="hidden" name="conversation_id" value="<?php echo (int) $activeConvId; ?>">
             <div class="saved-reply-modal-body">
                 <textarea name="conversation_note_body" rows="5" placeholder="Write an internal note for this conversation" required></textarea>
@@ -679,6 +717,7 @@ include("../layouts/header.php");
         <h5 style="margin-top:0; margin-bottom:14px; font-weight:600;">Edit Internal Note</h5>
         <form method="POST" action="">
             <input type="hidden" name="action" value="conversation_note_update">
+            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
             <input type="hidden" name="conversation_note_id" id="editNoteId">
             <div class="saved-reply-modal-body">
                 <textarea name="conversation_note_body" id="editNoteBody" rows="5" required></textarea>

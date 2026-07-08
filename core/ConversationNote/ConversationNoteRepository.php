@@ -13,6 +13,19 @@ class ConversationNoteRepository
 {
     public function __construct(private readonly mysqli $db) {}
 
+    public function findById(TenantContext $ctx, int $noteId): ?ConversationNote
+    {
+        $stmt = $this->db->prepare(
+            'SELECT * FROM conversation_notes WHERE id = ? AND company_id = ? LIMIT 1'
+        );
+        $stmt->bind_param('ii', $noteId, $ctx->companyId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        return $row ? ConversationNote::fromRow($row) : null;
+    }
+
     /** @return ConversationNote[] */
     public function findAllForConversation(TenantContext $ctx, int $conversationId): array
     {

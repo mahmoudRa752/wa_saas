@@ -46,8 +46,7 @@ CREATE TABLE IF NOT EXISTS conversation_notes (
     created_by      INT DEFAULT NULL,
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    KEY company_id (company_id),
-    KEY conversation_id (conversation_id),
+    KEY idx_conversation_notes_company_conversation_created (company_id, conversation_id, created_at),
     FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
     FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL

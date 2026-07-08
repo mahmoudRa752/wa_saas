@@ -14,6 +14,11 @@ class ConversationNoteService
         private readonly ConversationNoteRepository $repo
     ) {}
 
+    public function getById(TenantContext $ctx, int $noteId): ?ConversationNote
+    {
+        return $this->repo->findById($ctx, $noteId);
+    }
+
     /** @return ConversationNote[] */
     public function listForConversation(TenantContext $ctx, int $conversationId): array
     {
