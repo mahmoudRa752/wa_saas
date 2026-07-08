@@ -11,6 +11,8 @@ require_once(__DIR__ . '/../core/SavedReply/SavedReplyService.php');
 require_once(__DIR__ . '/../core/ConversationNote/ConversationNote.php');
 require_once(__DIR__ . '/../core/ConversationNote/ConversationNoteRepository.php');
 require_once(__DIR__ . '/../core/ConversationNote/ConversationNoteService.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageService.php');
 require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
 
 use Core\Conversation\ConversationRepository;
@@ -19,6 +21,8 @@ use Core\ConversationNote\ConversationNoteRepository;
 use Core\ConversationNote\ConversationNoteService;
 use Core\SavedReply\SavedReplyRepository;
 use Core\SavedReply\SavedReplyService;
+use Core\ChatMessage\ChatMessageRepository;
+use Core\ChatMessage\ChatMessageService;
 use Core\Services\WhatsAppService;
 use Core\TenantContext;
 
@@ -227,13 +231,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $cId = (int) $_GET['conv'];
 
         if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            // جلب الـ wamid للرسالة المراد تعديلها
-            $stmt = $conn->prepare("SELECT whatsapp_msg_id FROM chat_messages WHERE id = ?");
-            $stmt->bind_param('i', $msgId);
-            $stmt->execute();
-            $res = $stmt->get_result()->fetch_assoc();
-            $wamid = $res['whatsapp_msg_id'] ?? null;
-            $stmt->close();
+            $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
+            $wamid = $chatMsgService->getWamid($msgId);
 
             if ($wamid) {
                 $accessToken = "EAAZBGtwMbSu0BRxJrTffY3W0l3G3h6DVnGL3ZAkpOHemZC4VpKb937MrA112fy5VdrNCeWiyTqCZAACzoCoA7M3Pon9ZBP5syGIHBi6JmLOKEhZAGB06sxEZBD9yW8y0eVMAKzp3iwi4e7uq6m7rXN3ZBI9sZBDQNaXhCyq7A889DZA0BlHvZAZBQw3U0FzNrmKFg24g8Qx6u20ZAcfmdUwZB5Ekt7iWIpO5yceRFH1hocqmG9ZApM9cX1UFElPmXfltYutkk7ELeJ9anO0Mc60i2EqxBlt2gZDZD";
@@ -242,11 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $whatsAppService->editMessage($phoneNumberId, $wamid, $newBody, $accessToken);
             }
 
-            // تحديث النص محلياً في قاعدة البيانات
-            $updateMsg = $conn->prepare("UPDATE chat_messages SET body = ? WHERE id = ?");
-            $updateMsg->bind_param('si', $newBody, $msgId);
-            $updateMsg->execute();
-            $updateMsg->close();
+            $chatMsgService->updateBody($msgId, $newBody);
         }
         header("Location: chat.php?conv=" . $cId);
         exit;
@@ -258,12 +253,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $cId = (int) $_GET['conv'];
 
         if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            $stmt = $conn->prepare("SELECT whatsapp_msg_id FROM chat_messages WHERE id = ?");
-            $stmt->bind_param('i', $msgId);
-            $stmt->execute();
-            $res = $stmt->get_result()->fetch_assoc();
-            $wamid = $res['whatsapp_msg_id'] ?? null;
-            $stmt->close();
+            $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
+            $wamid = $chatMsgService->getWamid($msgId);
 
             if ($wamid) {
                 $accessToken = "EAAZBGtwMbSu0BR45Cvl2BYZCkupVr6DgwytZAt7sXfuBdyQy8bmlyLfKOuVmERuGXZCjtmt7wkgRKRcPUWLajhIrhi6ZCSU50SBzfjUsEw1aIZCSqwbhYIkdTEDd2WA0OZBDH4mYjoaaoQgxjTZCAy0y9akeZAZAwQgcUxkYxuaE2k3uCflKVz6wmZB33Twk5VoBzwaY8kkaBStt8iX5ZA1BCV9XZBb1G1ip7RXMZCp7dE6ZC2v8MvL3rxK6ZCoHtQi6njFGHRrV98rC4s4vwc9OP2m1nbDl";
@@ -272,11 +263,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 $whatsAppService->deleteMessage($phoneNumberId, $wamid, $accessToken);
             }
 
-            // حذفها محلياً بعد إرسال الطلب
-            $delMsg = $conn->prepare("DELETE FROM chat_messages WHERE id = ?");
-            $delMsg->bind_param('i', $msgId);
-            $delMsg->execute();
-            $delMsg->close();
+            $chatMsgService->delete($msgId);
         }
         header("Location: chat.php?conv=" . $cId);
         exit;
