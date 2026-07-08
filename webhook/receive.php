@@ -2,11 +2,17 @@
 // ملف مستقل تماماً لاستقبال بيانات Meta (Standalone)
 require_once("../config/db.php");
 require_once("../core/Conversation/Conversation.php");
-require_once("../core/Conversation/ConversationRepository.php");
-require_once("../core/Conversation/ConversationService.php");
+require_once(__DIR__ . '/../core/Conversation/ConversationRepository.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationService.php');
+require_once(__DIR__ . '/../core/WhatsAppNumber/WhatsAppNumberRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageService.php');
 
 use Core\Conversation\ConversationRepository;
 use Core\Conversation\ConversationService;
+use Core\WhatsAppNumber\WhatsAppNumberRepository;
+use Core\ChatMessage\ChatMessageRepository;
+use Core\ChatMessage\ChatMessageService;
 
 // 1. مرحلة التحقق المبدئي من فيسبوك (Webhook Verification Challenge)
 // يتم استدعاء هذا الجزء بطلب GET عند ربط الرابط لأول مرة في Meta Dashboard
@@ -41,6 +47,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $fromNumber = $message['from']; // رقم العميل (مثال: 966506493268)
         $msgBody    = '';
+        $wamid      = $message['id'];
+        $msgType    = $message['type'];
+        $filePath   = null;
 
         // استخراج نص الرسالة بناءً على نوعها (تدعم النص حالياً)
         if ($message['type'] === 'text') {
@@ -54,33 +63,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($msgBody) && !empty($phoneId)) {
 
             // معرفة الشركة والموظف المرتبطين بهذا الـ Phone Number ID
-            $stmt = $conn->prepare("
-                SELECT user_id, company_id 
-                FROM whatsapp_numbers 
-                JOIN users ON whatsapp_numbers.user_id = users.id 
-                WHERE whatsapp_numbers.phone_number_id = ? 
-                LIMIT 1
-            ");
-            $stmt->bind_param("s", $phoneId);
-            $stmt->execute();
-            $result = $stmt->get_result()->fetch_assoc();
-            $stmt->close();
+            $waNumberRepo = new WhatsAppNumberRepository($conn);
+            $companyId = $waNumberRepo->getCompanyIdByPhoneNumberId($phoneId);
 
-            if ($result) {
-                $companyId = (int)$result['company_id'];
+            if ($companyId) {
 
                 // Resolve conversation via ConversationService (find or create)
                 $convService = new ConversationService(new ConversationRepository($conn));
                 $convId      = $convService->findOrCreate($companyId, $fromNumber);
 
-                // إدخال الرسالة الواردة في جدول الشات الحي باتجاه 'in'
-                $msgStmt = $conn->prepare("
-                    INSERT INTO chat_messages (conversation_id, user_id, direction, body, sent_at) 
-                    VALUES (?, NULL, 'in', ?, NOW())
-                ");
-                $msgStmt->bind_param("is", $convId, $msgBody);
-                $msgStmt->execute();
-                $msgStmt->close();
+                $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
+                $chatMsgService->insertMessage(
+                    $convId,
+                    'in',
+                    $msgBody,
+                    null,
+                    $wamid,
+                    $msgType,
+                    $filePath
+                );
 
                 $convService->touch($convId);
             }

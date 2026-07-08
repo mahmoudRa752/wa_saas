@@ -23,6 +23,40 @@ class ChatMessageRepository
         return $result;
     }
 
+    public function getMessagesSince(int $conversationId, int $lastId): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT cm.id, cm.direction, cm.body, cm.message_type, cm.file_path, cm.sent_at, u.name AS sender_name
+            FROM chat_messages cm LEFT JOIN users u ON cm.user_id = u.id
+            WHERE cm.conversation_id = ? AND cm.id > ? ORDER BY cm.sent_at ASC
+        ");
+        $stmt->bind_param('ii', $conversationId, $lastId);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result;
+    }
+
+    public function insertMessage(
+        int $conversationId,
+        string $direction,
+        string $body,
+        ?int $userId = null,
+        ?string $wamid = null,
+        string $messageType = 'text',
+        ?string $filePath = null
+    ): int {
+        $stmt = $this->db->prepare("
+            INSERT INTO chat_messages (conversation_id, user_id, direction, body, whatsapp_msg_id, message_type, file_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ");
+        $stmt->bind_param('iisssss', $conversationId, $userId, $direction, $body, $wamid, $messageType, $filePath);
+        $stmt->execute();
+        $id = (int)$stmt->insert_id;
+        $stmt->close();
+        return $id;
+    }
+
     public function getWamid(int $messageId): ?string
     {
         $stmt = $this->db->prepare("SELECT whatsapp_msg_id FROM chat_messages WHERE id = ?");

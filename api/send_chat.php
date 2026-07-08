@@ -7,10 +7,16 @@ require_once("../config/db.php");
 require_once(__DIR__ . '/../core/Conversation/Conversation.php');
 require_once(__DIR__ . '/../core/Conversation/ConversationRepository.php');
 require_once(__DIR__ . '/../core/Conversation/ConversationService.php');
+require_once(__DIR__ . '/../core/WhatsAppNumber/WhatsAppNumberRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageService.php');
 require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
 
 use Core\Conversation\ConversationRepository;
 use Core\Conversation\ConversationService;
+use Core\WhatsAppNumber\WhatsAppNumberRepository;
+use Core\ChatMessage\ChatMessageRepository;
+use Core\ChatMessage\ChatMessageService;
 use Core\Services\WhatsAppService;
 
 header('Content-Type: application/json');
@@ -43,39 +49,26 @@ if ($conversationId <= 0) {
 const WHATSAPP_ACCESS_TOKEN = "EAAZBGtwMbSu0BR2aV2JmjOSNmHHBQAHrYyCcjDoSZCktJ5seX4XXGy8ci42Gb46oz2ZCZAWwOZBCF35kGXH9euUYgSeiZBJL5qeXtk1VXcPW9HM3idG1pZBh8R3LuAxOUKkjHA0cDd7j3gA6j57ym9EjPCfoSFRmtukVfP4nktiHnsmZCUCSlmGvWn6A7UYtklN0Brsk2LdKavex72zsvvzcRxSFaR1ZArhzO60furZCFxo7jS2hfTuVGl1aypLrqCAihmvNVYPVFcegtjDHZB91xApTZCn3";
 
 // 1. جلب بيانات رقم الواتساب المخصص للمستخدم الحالي (أدمن أو موظف) لضمان عدم التداخل
-$numResult = null;
+$waNumberRepo = new WhatsAppNumberRepository($conn);
+$phoneNumberId = null;
+
 if ($currentUserId > 0) {
-    $numQuery = $conn->prepare("SELECT phone_number_id FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
-    $numQuery->bind_param('i', $currentUserId);
-    $numQuery->execute();
-    $numResult = $numQuery->get_result()->fetch_assoc();
-    $numQuery->close();
+    $phoneNumberId = $waNumberRepo->getPhoneNumberIdByUserId($currentUserId);
 }
 
 // Fallback: حسابات الأدمن/الشركة (auth/login_company.php) لا تُسجّل user_id في
 // الجلسة أصلاً لأن الأدمن ليس له صف في جدول users، فـ $currentUserId يكون 0
 // ولن يوجد له رقم واتساب شخصي مباشرة. في هذه الحالة نستخدم أي رقم واتساب
 // مربوط بأحد موظفي نفس الشركة كرقم افتراضي، حتى لا يفشل الإرسال بالكامل.
-if (!$numResult) {
-    $fallbackQuery = $conn->prepare("
-        SELECT wn.phone_number_id
-        FROM whatsapp_numbers wn
-        INNER JOIN users u ON u.id = wn.user_id
-        WHERE u.company_id = ?
-        LIMIT 1
-    ");
-    $fallbackQuery->bind_param('i', $companyId);
-    $fallbackQuery->execute();
-    $numResult = $fallbackQuery->get_result()->fetch_assoc();
-    $fallbackQuery->close();
+if (!$phoneNumberId) {
+    $phoneNumberId = $waNumberRepo->getPhoneNumberIdByCompanyId($companyId);
 }
 
-if (!$numResult) {
+if (!$phoneNumberId) {
     echo json_encode(['error' => 'لم يتم العثور على رقم واتساب مخصص لهذا الحساب أو لأي موظف في الشركة. تأكد من ربط رقم واتساب واحد على الأقل من صفحة "أرقام واتساب".']);
     exit;
 }
 
-$phoneNumberId = $numResult['phone_number_id'];
 $accessToken   = WHATSAPP_ACCESS_TOKEN;
 
 // 2. جلب رقم هاتف العميل من المحادثة الحالية (via ConversationService)
@@ -147,14 +140,16 @@ if ($httpCode >= 200 && $httpCode < 300) {
 }
 
 // 5. حفظ الرسالة في قاعدة البيانات مع ربطها بالـ user_id الخاص بالمرسل الحالي
-$insStmt = $conn->prepare("
-    INSERT INTO chat_messages (conversation_id, user_id, direction, body, message_type, file_path, whatsapp_msg_id, sent_at) 
-    VALUES (?, ?, 'out', ?, ?, ?, ?, NOW())
-");
-$insStmt->bind_param('iissss', $conversationId, $currentUserId, $messageBody, $messageType, $filePath, $wamid);
-$insStmt->execute();
-$newMsgId = $insStmt->insert_id;
-$insStmt->close();
+$chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
+$newMsgId = $chatMsgService->insertMessage(
+    $conversationId,
+    'out',
+    $messageBody,
+    $currentUserId,
+    $wamid,
+    $messageType,
+    $filePath
+);
 
 // تحديث وقت آخر رسالة في المحادثة (via ConversationService)
 $convService->touch($conversationId);
