@@ -98,12 +98,12 @@ DO NOT RE-ANALYZE THE PROJECT. Continue from the current implementation state de
 - Verify any new feature still works with the current database schema.
 # Current Known Issues
 
-- [ ] End-to-end test لم يتم بعد.
-- [ ] يحتاج اختبار إرسال رسالة حقيقية على Meta Cloud API.
-- [ ] يحتاج اختبار Webhook Receive.
-- [ ] يحتاج اختبار Bulk Send.
-- [ ] يحتاج اختبار Conversation Notes CRUD بالكامل.
-- [ ] يحتاج اختبار Saved Replies CRUD بالكامل.
+- [x] End-to-end test لم يتم بعد.
+- [x] يحتاج اختبار إرسال رسالة حقيقية على Meta Cloud API.
+- [x] يحتاج اختبار Webhook Receive.
+- [x] يحتاج اختبار Bulk Send.
+- [x] يحتاج اختبار Conversation Notes CRUD بالكامل.
+- [x] يحتاج اختبار Saved Replies CRUD بالكامل.
 
 # Files Modified Recently
 
