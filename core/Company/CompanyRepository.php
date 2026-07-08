@@ -24,4 +24,14 @@ class CompanyRepository
         
         return $employees;
     }
+
+    public function getTotalEmployees(int $companyId): int
+    {
+        $stmt = $this->conn->prepare("SELECT COUNT(*) as total FROM users WHERE company_id = ?");
+        $stmt->bind_param("i", $companyId);
+        $stmt->execute();
+        $total = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+        $stmt->close();
+        return $total;
+    }
 }

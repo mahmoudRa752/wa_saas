@@ -2,8 +2,12 @@
 session_start();
 require_once("../config/db.php");
 require_once(__DIR__ . '/../core/Services/UsageService.php');
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+require_once(__DIR__ . '/../core/MessageLog/MessageLogRepository.php');
 
 use Core\Services\UsageService;
+use Core\Company\CompanyRepository;
+use Core\MessageLog\MessageLogRepository;
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -12,27 +16,18 @@ if (!isset($_SESSION['company_id'])) {
 
 $company_id = $_SESSION['company_id'];
 $usageService = new UsageService($conn);
+$companyRepo = new CompanyRepository($conn);
+$msgLogRepo = new MessageLogRepository($conn);
 
 // إجمالي الرسائل
-$stmt = $conn->prepare("
-    SELECT COUNT(*) as total
-    FROM messages m
-    JOIN users u ON m.user_id = u.id
-    WHERE u.company_id = ?
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$totalMessages = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$totalMessages = $msgLogRepo->getTotalMessagesForCompany($company_id);
 
 // رسائل هذا الشهر
 $usageSummary = $usageService->getSubscriptionUsageSummary($company_id);
 $monthlyMessages = $usageSummary['monthlyMessages'];
 
 // عدد الموظفين
-$stmt = $conn->prepare("SELECT COUNT(*) as total FROM users WHERE company_id = ?");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$totalEmployees = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$totalEmployees = $companyRepo->getTotalEmployees($company_id);
 
 // الاشتراك الحالي
 $planName = $usageSummary['planName'];
@@ -41,17 +36,7 @@ $endDate  = $usageSummary['endDate'];
 $usagePercent = $usageSummary['usagePercent'];
 
 // آخر 5 رسائل
-$stmt = $conn->prepare("
-    SELECT m.recipient, m.status, m.sent_at
-    FROM messages m
-    JOIN users u ON m.user_id = u.id
-    WHERE u.company_id = ?
-    ORDER BY m.sent_at DESC
-    LIMIT 5
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$recentMessages = $stmt->get_result();
+$recentMessagesList = $msgLogRepo->getRecentMessagesForCompany($company_id, 5);
 
 include("../layouts/header.php");
 ?>
@@ -151,7 +136,7 @@ include("../layouts/header.php");
             </div>
 
             <div class="px-3 pb-3">
-                <?php if ($recentMessages->num_rows > 0): ?>
+                <?php if (!empty($recentMessagesList)): ?>
                     <table class="table-custom w-100">
                         <thead>
                             <tr>
@@ -161,7 +146,7 @@ include("../layouts/header.php");
                             </tr>
                         </thead>
                         <tbody>
-                        <?php while ($row = $recentMessages->fetch_assoc()): ?>
+                        <?php foreach ($recentMessagesList as $row): ?>
                             <tr>
                                 <td>
                                     <i class="bi bi-phone me-1 text-muted"></i>
@@ -178,7 +163,7 @@ include("../layouts/header.php");
                                     <?php echo date('M d, H:i', strtotime($row['sent_at'])); ?>
                                 </td>
                             </tr>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                         </tbody>
                     </table>
                 <?php else: ?>

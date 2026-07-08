@@ -17,4 +17,36 @@ class MessageLogRepository
         $stmt->close();
         return $result;
     }
+
+    public function getTotalMessagesForCompany(int $companyId): int
+    {
+        $stmt = $this->conn->prepare("
+            SELECT COUNT(*) as total
+            FROM messages m
+            JOIN users u ON m.user_id = u.id
+            WHERE u.company_id = ?
+        ");
+        $stmt->bind_param("i", $companyId);
+        $stmt->execute();
+        $total = (int) ($stmt->get_result()->fetch_assoc()['total'] ?? 0);
+        $stmt->close();
+        return $total;
+    }
+
+    public function getRecentMessagesForCompany(int $companyId, int $limit = 5): array
+    {
+        $stmt = $this->conn->prepare("
+            SELECT m.recipient, m.status, m.sent_at
+            FROM messages m
+            JOIN users u ON m.user_id = u.id
+            WHERE u.company_id = ?
+            ORDER BY m.sent_at DESC
+            LIMIT ?
+        ");
+        $stmt->bind_param("ii", $companyId, $limit);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result;
+    }
 }
