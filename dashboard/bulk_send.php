@@ -7,7 +7,14 @@ require_once(__DIR__ . '/../core/Services/UsageService.php');
 
 use Core\Services\UsageService;
 use Core\Services\WhatsAppService;
+use Core\Company\CompanyRepository;
+use Core\WhatsAppNumber\WhatsAppNumberRepository;
+use Core\MessageLog\MessageLogRepository;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+require_once(__DIR__ . '/../core/WhatsAppNumber/WhatsAppNumberRepository.php');
+require_once(__DIR__ . '/../core/MessageLog/MessageLogRepository.php');
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -24,14 +31,8 @@ $used = $usage['used'];
 
 // ✅ جلب الموظفين
 if ($role == 'admin') {
-    $stmt = $conn->prepare("
-        SELECT u.id, u.name
-        FROM users u
-        WHERE u.company_id = ?
-    ");
-    $stmt->bind_param("i", $company_id);
-    $stmt->execute();
-    $employees = $stmt->get_result();
+    $companyRepo = new CompanyRepository($conn);
+    $employeesList = $companyRepo->getEmployees($company_id);
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
@@ -46,16 +47,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             $user_id = $_SESSION['user_id'];
         }
 
-        $stmt = $conn->prepare("SELECT phone_number_id FROM whatsapp_numbers WHERE user_id = ?");
-        $stmt->bind_param("i", $user_id);
-        $stmt->execute();
-        $numberData = $stmt->get_result()->fetch_assoc();
+        $waNumberRepo = new WhatsAppNumberRepository($conn);
+        $phoneNumberId = $waNumberRepo->getPhoneNumberIdByUserId($user_id);
 
-        if (!$numberData) {
+        if (!$phoneNumberId) {
             $error = "No WhatsApp number linked.";
         } else {
-
-            $phoneNumberId = $numberData['phone_number_id'];
             $accessToken = WHATSAPP_TOKEN;
 
             $spreadsheet = IOFactory::load($_FILES['file']['tmp_name']);
@@ -92,9 +89,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
 
                 // حفظ الرسالة الفعلية المسلمة في جدول التقارير
-                $stmt = $conn->prepare("INSERT INTO messages (user_id, recipient, message, status) VALUES (?, ?, ?, 'sent')");
-                $stmt->bind_param("iss", $user_id, $recipient, $messageText);
-                $stmt->execute();
+                $msgLogRepo = new MessageLogRepository($conn);
+                $msgLogRepo->logSentMessage($user_id, $recipient, $messageText);
             }
 
             $success = "✅ Bulk messages processed successfully.";
@@ -123,11 +119,11 @@ include("../layouts/header.php");
                     <label class="form-label">Select Employee</label>
                     <select name="user_id" class="form-control" required>
                         <option value="">Choose employee</option>
-                        <?php while($emp = $employees->fetch_assoc()): ?>
+                        <?php foreach($employeesList as $emp): ?>
                             <option value="<?php echo $emp['id']; ?>">
-                                <?php echo $emp['name']; ?>
+                                <?php echo htmlspecialchars($emp['name']); ?>
                             </option>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                     </select>
                 </div>
 

@@ -7,7 +7,14 @@ require_once(__DIR__ . '/../core/Services/UsageService.php');
 
 use Core\Services\UsageService;
 use Core\Services\WhatsAppService;
+use Core\Company\CompanyRepository;
+use Core\WhatsAppNumber\WhatsAppNumberRepository;
+use Core\MessageLog\MessageLogRepository;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+require_once(__DIR__ . '/../core/WhatsAppNumber/WhatsAppNumberRepository.php');
+require_once(__DIR__ . '/../core/MessageLog/MessageLogRepository.php');
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -26,10 +33,8 @@ $used = $usage['used'];
    ✅ جلب الموظفين (Admin فقط)
 ================================= */
 if ($role == 'admin') {
-    $stmt = $conn->prepare("SELECT id, name FROM users WHERE company_id = ?");
-    $stmt->bind_param("i", $company_id);
-    $stmt->execute();
-    $employees = $stmt->get_result();
+    $companyRepo = new CompanyRepository($conn);
+    $employeesList = $companyRepo->getEmployees($company_id);
 }
 
 /* ===============================
@@ -51,16 +56,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $accessToken = WHATSAPP_TOKEN;
 
         // ✅ جلب رقم واتساب
-        $stmt = $conn->prepare("SELECT phone_number_id FROM whatsapp_numbers WHERE user_id = ?");
-        $stmt->bind_param("i", $user_id);
-        $stmt->execute();
-        $numberData = $stmt->get_result()->fetch_assoc();
+        $waNumberRepo = new WhatsAppNumberRepository($conn);
+        $phoneNumberId = $waNumberRepo->getPhoneNumberIdByUserId($user_id);
 
-        if (!$numberData) {
+        if (!$phoneNumberId) {
             $error = "No WhatsApp number linked.";
         } else {
-
-            $phoneNumberId = $numberData['phone_number_id'];
 
             if ($mode == "manual") {
 
@@ -115,9 +116,8 @@ function sendWhatsApp($user_id, $phoneNumberId, $recipient, $message, $accessTok
 
     $result = $whatsAppService->sendText($phoneNumberId, $recipient, $message, $accessToken);
 
-    $stmt = $conn->prepare("INSERT INTO messages (user_id, recipient, message, status) VALUES (?, ?, ?, 'sent')");
-    $stmt->bind_param("iss", $user_id, $recipient, $message);
-    $stmt->execute();
+    $msgLogRepo = new MessageLogRepository($conn);
+    $msgLogRepo->logSentMessage($user_id, $recipient, $message);
 }
 
 include("../layouts/header.php");
@@ -141,11 +141,11 @@ include("../layouts/header.php");
                     <label>Select Employee</label>
                     <select name="user_id" class="form-control" required>
                         <option value="">Choose employee</option>
-                        <?php while($emp = $employees->fetch_assoc()): ?>
+                        <?php foreach($employeesList as $emp): ?>
                             <option value="<?php echo $emp['id']; ?>">
-                                <?php echo $emp['name']; ?>
+                                <?php echo htmlspecialchars($emp['name']); ?>
                             </option>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                     </select>
                 </div>
 
