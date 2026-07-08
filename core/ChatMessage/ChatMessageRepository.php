@@ -9,6 +9,20 @@ class ChatMessageRepository
     {
     }
 
+    public function listForConversation(int $conversationId, int $limit = 50): array
+    {
+        $stmt = $this->db->prepare("
+            SELECT cm.id, cm.direction, cm.body, cm.message_type, cm.file_path, cm.sent_at, u.name AS sender_name
+            FROM chat_messages cm LEFT JOIN users u ON cm.user_id = u.id
+            WHERE cm.conversation_id = ? ORDER BY cm.sent_at DESC LIMIT ?
+        ");
+        $stmt->bind_param('ii', $conversationId, $limit);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result;
+    }
+
     public function getWamid(int $messageId): ?string
     {
         $stmt = $this->db->prepare("SELECT whatsapp_msg_id FROM chat_messages WHERE id = ?");

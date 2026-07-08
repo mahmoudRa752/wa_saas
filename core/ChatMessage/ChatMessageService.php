@@ -7,6 +7,11 @@ class ChatMessageService
     {
     }
 
+    public function listForConversation(int $conversationId, int $limit = 50): array
+    {
+        return $this->repo->listForConversation($conversationId, $limit);
+    }
+
     public function getWamid(int $messageId): ?string
     {
         return $this->repo->getWamid($messageId);

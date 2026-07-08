@@ -310,15 +310,8 @@ if ($activeConvId > 0) {
     $acStmt->close();
 
     if ($activeConv) {
-        $msgStmt = $conn->prepare("
-            SELECT cm.id, cm.direction, cm.body, cm.message_type, cm.file_path, cm.sent_at, u.name AS sender_name
-            FROM chat_messages cm LEFT JOIN users u ON cm.user_id = u.id
-            WHERE cm.conversation_id = ? ORDER BY cm.sent_at DESC LIMIT 50
-        ");
-        $msgStmt->bind_param('i', $activeConvId);
-        $msgStmt->execute();
-        $initMessages = $msgStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $msgStmt->close();
+        $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
+        $initMessages = $chatMsgService->listForConversation($activeConvId, 50);
 
         $conversationNotes = $conversationNoteService->listForConversation($tenantContext, $activeConvId);
     } else {
