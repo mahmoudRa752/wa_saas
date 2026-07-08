@@ -73,7 +73,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         $message
                 );
 
-                sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken);
+                sendWhatsApp($user_id, $phoneNumberId, $recipient, $message, $accessToken);
                 $success = "✅ Message sent successfully!";
 
             } else {
@@ -96,7 +96,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         $message = str_replace("{" . $columnName . "}", $value, $message);
                     }
 
-                    sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken);
+                    sendWhatsApp($user_id, $phoneNumberId, $recipient, $message, $accessToken);
                 }
 
                 $success = "✅ Bulk messages processed!";
@@ -108,7 +108,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 /* ===============================
    ✅ دالة الإرسال
 ================================= */
-function sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken){
+function sendWhatsApp($user_id, $phoneNumberId, $recipient, $message, $accessToken){
 
     global $conn;
     global $whatsAppService;
@@ -116,7 +116,7 @@ function sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken){
     $result = $whatsAppService->sendText($phoneNumberId, $recipient, $message, $accessToken);
 
     $stmt = $conn->prepare("INSERT INTO messages (user_id, recipient, message, status) VALUES (?, ?, ?, 'sent')");
-    $stmt->bind_param("iss", $_SESSION['user_id'], $recipient, $message);
+    $stmt->bind_param("iss", $user_id, $recipient, $message);
     $stmt->execute();
 }
 
