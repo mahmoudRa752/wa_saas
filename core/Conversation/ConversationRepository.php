@@ -78,4 +78,36 @@ class ConversationRepository
         $stmt->execute();
         $stmt->close();
     }
+    /**
+     * Update pin status.
+     */
+    public function updatePin(int $id, int $companyId, int $isPinned): void
+    {
+        $stmt = $this->db->prepare('UPDATE conversations SET is_pinned = ? WHERE id = ? AND company_id = ?');
+        $stmt->bind_param('iii', $isPinned, $id, $companyId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /**
+     * Update contact number.
+     */
+    public function updateContactNumber(int $id, int $companyId, string $contactNumber): void
+    {
+        $stmt = $this->db->prepare('UPDATE conversations SET contact_number = ? WHERE id = ? AND company_id = ?');
+        $stmt->bind_param('sii', $contactNumber, $id, $companyId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /**
+     * Delete conversation.
+     */
+    public function deleteById(int $id, int $companyId): void
+    {
+        $stmt = $this->db->prepare('DELETE FROM conversations WHERE id = ? AND company_id = ?');
+        $stmt->bind_param('ii', $id, $companyId);
+        $stmt->execute();
+        $stmt->close();
+    }
 }

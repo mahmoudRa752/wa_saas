@@ -190,10 +190,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $cId = (int) $_POST['conv_id'];
         $status = (int) $_POST['pin_status'];
         if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            $pinStmt = $conn->prepare("UPDATE conversations SET is_pinned = ? WHERE id = ? AND company_id = ?");
-            $pinStmt->bind_param('iii', $status, $cId, $companyId);
-            $pinStmt->execute();
-            $pinStmt->close();
+            $convService = new ConversationService(new ConversationRepository($conn));
+            $convService->updatePin($cId, $companyId, $status);
         }
         header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
         exit;
@@ -204,10 +202,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $cId = (int) $_POST['conv_id'];
         $updatedNumber = trim($_POST['edit_number']);
         if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            $editStmt = $conn->prepare("UPDATE conversations SET contact_number = ? WHERE id = ? AND company_id = ?");
-            $editStmt->bind_param('sii', $updatedNumber, $cId, $companyId);
-            $editStmt->execute();
-            $editStmt->close();
+            $convService = new ConversationService(new ConversationRepository($conn));
+            $convService->updateContactNumber($cId, $companyId, $updatedNumber);
         }
         header("Location: chat.php?conv=" . $cId);
         exit;
@@ -217,15 +213,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'delete_chat') {
         $cId = (int) $_POST['conv_id'];
         if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            $delMsgs = $conn->prepare("DELETE FROM chat_messages WHERE conversation_id = ?");
-            $delMsgs->bind_param('i', $cId);
-            $delMsgs->execute();
-            $delMsgs->close();
-
-            $delConv = $conn->prepare("DELETE FROM conversations WHERE id = ? AND company_id = ?");
-            $delConv->bind_param('ii', $cId, $companyId);
-            $delConv->execute();
-            $delConv->close();
+            $convService = new ConversationService(new ConversationRepository($conn));
+            $convService->delete($cId, $companyId);
         }
         header("Location: chat.php");
         exit;

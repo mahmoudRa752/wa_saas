@@ -51,4 +51,19 @@ class ConversationService
     {
         $this->repo->touchTimestamp($conversationId);
     }
+
+    public function updatePin(int $conversationId, int $companyId, int $isPinned): void
+    {
+        $this->repo->updatePin($conversationId, $companyId, $isPinned);
+    }
+
+    public function updateContactNumber(int $conversationId, int $companyId, string $contactNumber): void
+    {
+        $this->repo->updateContactNumber($conversationId, $companyId, $contactNumber);
+    }
+
+    public function delete(int $conversationId, int $companyId): void
+    {
+        $this->repo->deleteById($conversationId, $companyId);
+    }
 }
