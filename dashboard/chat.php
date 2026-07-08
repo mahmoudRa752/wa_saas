@@ -4,9 +4,18 @@ require_once("../config/db.php");
 require_once(__DIR__ . '/../core/Conversation/Conversation.php');
 require_once(__DIR__ . '/../core/Conversation/ConversationRepository.php');
 require_once(__DIR__ . '/../core/Conversation/ConversationService.php');
+require_once(__DIR__ . '/../core/TenantContext.php');
+require_once(__DIR__ . '/../core/SavedReply/SavedReply.php');
+require_once(__DIR__ . '/../core/SavedReply/SavedReplyRepository.php');
+require_once(__DIR__ . '/../core/SavedReply/SavedReplyService.php');
+require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
 
 use Core\Conversation\ConversationRepository;
 use Core\Conversation\ConversationService;
+use Core\SavedReply\SavedReplyRepository;
+use Core\SavedReply\SavedReplyService;
+use Core\Services\WhatsAppService;
+use Core\TenantContext;
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -19,6 +28,19 @@ $userId       = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
 $isAdmin      = ($role === 'admin');
 // created_by confirmed present in live DB (schema audit 2025). No runtime ALTER needed.
 $hasCreatedBy = true;
+
+$tenantContext = TenantContext::fromSession();
+$savedReplyService = new SavedReplyService(new SavedReplyRepository($conn));
+$conn->query("CREATE TABLE IF NOT EXISTS saved_replies (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    company_id INT NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    created_by INT DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    KEY company_id (company_id)
+)");
+$savedReplies = $savedReplyService->list($tenantContext);
 
 /**
  * Builds the WHERE clause fragment for conversation isolation by role.
@@ -70,6 +92,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             header("Location: chat.php?conv=" . $newId);
             exit;
         }
+    }
+
+    if ($action === 'saved_reply_create') {
+        $title = trim($_POST['saved_reply_title'] ?? '');
+        $body = trim($_POST['saved_reply_body'] ?? '');
+        if ($title !== '' && $body !== '') {
+            $savedReplyService->create($tenantContext, $title, $body, $userId);
+        }
+        header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
+        exit;
+    }
+
+    if ($action === 'saved_reply_delete') {
+        $savedReplyId = (int) ($_POST['saved_reply_id'] ?? 0);
+        if ($savedReplyId > 0) {
+            $savedReplyService->delete($tenantContext, $savedReplyId);
+        }
+        header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
+        exit;
     }
 
     // تثبيت / إلغاء تثبيت المحادثة
@@ -136,23 +177,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($wamid) {
                 $accessToken = "EAAZBGtwMbSu0BRxJrTffY3W0l3G3h6DVnGL3ZAkpOHemZC4VpKb937MrA112fy5VdrNCeWiyTqCZAACzoCoA7M3Pon9ZBP5syGIHBi6JmLOKEhZAGB06sxEZBD9yW8y0eVMAKzp3iwi4e7uq6m7rXN3ZBI9sZBDQNaXhCyq7A889DZA0BlHvZAZBQw3U0FzNrmKFg24g8Qx6u20ZAcfmdUwZB5Ekt7iWIpO5yceRFH1hocqmG9ZApM9cX1UFElPmXfltYutkk7ELeJ9anO0Mc60i2EqxBlt2gZDZD";
                 $phoneNumberId = "1165715256628007";
-                $url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
-                $payload = [
-                    "messaging_product" => "whatsapp",
-                    "status" => "edited",
-                    "message_id" => $wamid,
-                    "text" => ["body" => $newBody]
-                ];
-                $ch = curl_init($url);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                    "Authorization: Bearer " . $accessToken,
-                    "Content-Type: application/json"
-                ]);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_exec($ch);
-                curl_close($ch);
+                $whatsAppService = new WhatsAppService();
+                $whatsAppService->editMessage($phoneNumberId, $wamid, $newBody, $accessToken);
             }
 
             // تحديث النص محلياً في قاعدة البيانات
@@ -181,22 +207,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             if ($wamid) {
                 $accessToken = "EAAZBGtwMbSu0BR45Cvl2BYZCkupVr6DgwytZAt7sXfuBdyQy8bmlyLfKOuVmERuGXZCjtmt7wkgRKRcPUWLajhIrhi6ZCSU50SBzfjUsEw1aIZCSqwbhYIkdTEDd2WA0OZBDH4mYjoaaoQgxjTZCAy0y9akeZAZAwQgcUxkYxuaE2k3uCflKVz6wmZB33Twk5VoBzwaY8kkaBStt8iX5ZA1BCV9XZBb1G1ip7RXMZCp7dE6ZC2v8MvL3rxK6ZCoHtQi6njFGHRrV98rC4s4vwc9OP2m1nbDl";
                 $phoneNumberId = "1165715256628007";
-                $url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
-                $payload = [
-                    "messaging_product" => "whatsapp",
-                    "status" => "deleted",
-                    "message_id" => $wamid
-                ];
-                $ch = curl_init($url);
-                curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                    "Authorization: Bearer " . $accessToken,
-                    "Content-Type: application/json"
-                ]);
-                curl_setopt($ch, CURLOPT_POST, true);
-                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-                curl_exec($ch);
-                curl_close($ch);
+                $whatsAppService = new WhatsAppService();
+                $whatsAppService->deleteMessage($phoneNumberId, $wamid, $accessToken);
             }
 
             // حذفها محلياً بعد إرسال الطلب
@@ -334,6 +346,15 @@ include("../layouts/header.php");
 .chat-empty-state { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #667781; gap: 12px; background: #f8f9fa; border-bottom: 6px solid #00a884; }
 .chat-empty-state i { font-size: 80px; color: #ced5d8; }
 #fileInput { display: none; }
+.saved-replies-panel { padding: 10px 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+.saved-replies-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #334155; }
+.saved-replies-new-btn { border: none; background: #2563eb; color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.saved-replies-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.saved-reply-item-row { display: inline-flex; align-items: center; gap: 6px; }
+.saved-reply-item { border: 1px solid #dbeafe; background: #fff; color: #1e3a8a; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.saved-reply-delete { border: none; background: #fee2e2; color: #b91c1c; border-radius: 999px; width: 22px; height: 22px; cursor: pointer; font-size: 12px; }
+.saved-reply-modal-body { display: flex; flex-direction: column; gap: 10px; }
+.saved-reply-modal-body input, .saved-reply-modal-body textarea { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
 </style>
 <div class="chat-wrapper">
     <div class="conv-list">
@@ -456,6 +477,30 @@ include("../layouts/header.php");
                     </div>
                 <?php endforeach; ?>
             </div>
+            <div class="saved-replies-panel">
+                <div class="saved-replies-header">
+                    <span>Saved Replies</span>
+                    <button type="button" class="saved-replies-new-btn" onclick="toggleModal('savedReplyModal')">+ New</button>
+                </div>
+                <div class="saved-replies-list">
+                    <?php if (empty($savedReplies)): ?>
+                        <span style="font-size:12px;color:#64748b;">No saved replies yet.</span>
+                    <?php else: ?>
+                        <?php foreach ($savedReplies as $reply): ?>
+                            <div class="saved-reply-item-row">
+                                <button type="button" class="saved-reply-item" data-body="<?php echo htmlspecialchars($reply->body, ENT_QUOTES); ?>" onclick="insertSavedReply(this)">
+                                    <?php echo htmlspecialchars($reply->title); ?>
+                                </button>
+                                <form method="POST" action="" onsubmit="return confirm('Delete this saved reply?');" style="margin:0;">
+                                    <input type="hidden" name="action" value="saved_reply_delete">
+                                    <input type="hidden" name="saved_reply_id" value="<?php echo (int) $reply->id; ?>">
+                                    <button type="submit" class="saved-reply-delete" title="Delete">×</button>
+                                </form>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
             <div class="chat-input-area">
                 <div class="native-emoji-picker" id="nativeEmojiPicker">
                     <div class="emoji-picker-header">Emojis & Stickers</div>
@@ -523,6 +568,23 @@ include("../layouts/header.php");
     </div>
 </div>
 
+<div id="savedReplyModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:24px; border-radius:12px; width:420px;">
+        <h5 style="margin-top:0; margin-bottom:14px; font-weight:600;">Create Saved Reply</h5>
+        <form method="POST" action="">
+            <input type="hidden" name="action" value="saved_reply_create">
+            <div class="saved-reply-modal-body">
+                <input type="text" name="saved_reply_title" placeholder="Reply title" required>
+                <textarea name="saved_reply_body" rows="5" placeholder="Reply text" required></textarea>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
+                <button type="button" onclick="toggleModal('savedReplyModal')" style="padding:6px 12px; border-radius:6px; background:#eee; border:none;">Cancel</button>
+                <button type="submit" style="padding:6px 12px; border-radius:6px; background:#2563eb; color:#fff; border:none;">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
 // ── سكربت عام: يعمل دائماً بغض النظر عن وجود محادثة نشطة ──
 function toggleDropdownMenu(event, id) {
@@ -569,6 +631,15 @@ function filterConversations() {
         const num = item.getAttribute('data-number').toLowerCase();
         item.style.display = num.includes(query) ? 'flex' : 'none';
     });
+}
+function insertSavedReply(button) {
+    const input = document.getElementById('msgInput');
+    const body = button.getAttribute('data-body') || '';
+    if (input) {
+        input.value = body;
+        input.focus();
+        input.dispatchEvent(new Event('input'));
+    }
 }
 </script>
 

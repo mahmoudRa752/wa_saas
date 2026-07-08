@@ -108,7 +108,6 @@ if ($messageType !== 'text' && isset($_FILES['attachment']) && $_FILES['attachme
 }
 
 // 4. إعداد وإرسال طلب Meta API بناءً على بيانات رقم المستخدم الحالي
-$url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
 $payload = [
     "messaging_product" => "whatsapp",
     "recipient_type"    => "individual",
