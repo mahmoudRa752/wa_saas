@@ -37,7 +37,7 @@ class CompanyRepository
 
     public function getById(int $companyId): ?array
     {
-        $stmt = $this->conn->prepare("SELECT name, email FROM companies WHERE id = ?");
+        $stmt = $this->conn->prepare("SELECT name, email, logo FROM companies WHERE id = ?");
         $stmt->bind_param("i", $companyId);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();

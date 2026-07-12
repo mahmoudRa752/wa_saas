@@ -1,13 +1,14 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
 require_once(__DIR__ . "/../config/db.php");
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+
+use Core\Company\CompanyRepository;
 
 $companyLogo = null;
 if (isset($_SESSION['company_id'])) {
-    $stmt = $conn->prepare("SELECT logo FROM companies WHERE id = ?");
-    $stmt->bind_param("i", $_SESSION['company_id']);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
+    $companyRepo = new CompanyRepository($conn);
+    $row = $companyRepo->getById((int)$_SESSION['company_id']);
     $companyLogo = $row['logo'] ?? null;
 }
 $currentPage = basename($_SERVER['PHP_SELF']);
