@@ -7,9 +7,9 @@ use Core\Auth\AuthRepository;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-    $email    = trim($_POST['email']);
-    $password = $_POST['password'];
-    $type     = $_POST['type'];
+    $email    = isset($_POST['email']) ? trim($_POST['email']) : '';
+    $password = $_POST['password'] ?? '';
+    $type     = $_POST['type'] ?? 'company';
     $authRepo = new AuthRepository($conn);
 
     if ($type === "company") {

@@ -5,9 +5,8 @@ require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
 use Core\Company\CompanyRepository;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-
-    $email = trim($_POST['email']);
-    $password = $_POST['password'];
+    $email = isset($_POST['email']) ? trim($_POST['email']) : '';
+    $password = $_POST['password'] ?? '';
 
     $companyRepo = new CompanyRepository($conn);
     $company = $companyRepo->findByEmail($email);

@@ -5,9 +5,8 @@ require_once(__DIR__ . '/../core/Employee/EmployeeRepository.php');
 use Core\Employee\EmployeeRepository;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
-
-    $email = trim($_POST['email']);
-    $password = $_POST['password'];
+    $email = isset($_POST['email']) ? trim($_POST['email']) : '';
+    $password = $_POST['password'] ?? '';
 
     $employeeRepo = new EmployeeRepository($conn);
     $user = $employeeRepo->findByEmail($email);

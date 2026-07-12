@@ -15,10 +15,10 @@ if (isset($_SESSION['company_id'])) {
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-    $name = trim($_POST['name']);
-    $email = trim($_POST['email']);
-    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-    $company_code = trim($_POST['company_code']);
+    $name = isset($_POST['name']) ? trim($_POST['name']) : '';
+    $email = isset($_POST['email']) ? trim($_POST['email']) : '';
+    $password = isset($_POST['password']) ? password_hash($_POST['password'], PASSWORD_DEFAULT) : '';
+    $company_code = isset($_POST['company_code']) ? trim($_POST['company_code']) : '';
     $authRepo = new AuthRepository($conn);
     $companyRepo = new CompanyRepository($conn);
 
