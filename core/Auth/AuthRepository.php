@@ -45,10 +45,11 @@ class AuthRepository
         return $row ?: null;
     }
 
-    public function createCompany(string $name, string $email, string $passwordHash): int
+    public function createCompany(string $name, string $email, string $passwordHash): int|string
     {
-        $stmt = $this->conn->prepare("INSERT INTO companies (name, email, password) VALUES (?, ?, ?)");
-        $stmt->bind_param("sss", $name, $email, $passwordHash);
+        $companyCode = substr(md5(uniqid(mt_rand(), true)), 0, 8); // Generate an 8-character code
+        $stmt = $this->conn->prepare("INSERT INTO companies (name, email, password, company_code) VALUES (?, ?, ?, ?)");
+        $stmt->bind_param("ssss", $name, $email, $passwordHash, $companyCode);
         $stmt->execute();
         $id = (int) $stmt->insert_id;
         $stmt->close();
