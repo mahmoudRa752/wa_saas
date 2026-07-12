@@ -15,7 +15,6 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 $titles = [
         'index.php'            => 'Dashboard',
         'send.php'             => 'Send Message',
-        'bulk_send.php'        => 'Bulk Send',
         'employees.php'        => 'Employees',
         'whatsapp_numbers.php' => 'WhatsApp Numbers',
         'upgrade.php'          => 'Upgrade Plan',
@@ -221,9 +220,6 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
             </a>
             <a href="/wa_saas/dashboard/send.php" class="nav-link <?php echo $currentPage === 'send.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-send-fill"></i></span> Send Message
-            </a>
-            <a href="/wa_saas/dashboard/bulk_send.php" class="nav-link <?php echo $currentPage === 'bulk_send.php' ? 'active' : ''; ?>">
-                <span class="nav-icon"><i class="bi bi-collection-fill"></i></span> Bulk Send
             </a>
             <a href="/wa_saas/dashboard/chat.php" class="nav-link <?php echo $currentPage === 'chat.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-chat-dots-fill"></i></span> Live Chat

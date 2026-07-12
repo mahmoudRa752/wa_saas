@@ -109,12 +109,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 /* ===============================
    ✅ دالة الإرسال
 ================================= */
-function sendWhatsApp($user_id, $phoneNumberId, $recipient, $message, $accessToken){
+function sendWhatsApp($user_id, $phoneNumberId, $recipient, &$message, $accessToken){
 
     global $conn;
     global $whatsAppService;
 
     $result = $whatsAppService->sendText($phoneNumberId, $recipient, $message, $accessToken);
+    $httpCode = $result['httpCode'];
+
+    if ($httpCode != 200) {
+        $whatsAppService->sendTemplate($phoneNumberId, $recipient, $accessToken);
+        $message = "[Template: hello_world]";
+    }
 
     $msgLogRepo = new MessageLogRepository($conn);
     $msgLogRepo->logSentMessage($user_id, $recipient, $message);
