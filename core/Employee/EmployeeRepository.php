@@ -10,6 +10,44 @@ class EmployeeRepository
     {
     }
 
+    public function getById(int $userId): ?array
+    {
+        $stmt = $this->conn->prepare("SELECT * FROM users WHERE id = ?");
+        $stmt->bind_param("i", $userId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ?: null;
+    }
+
+    public function updateProfile(int $userId, string $name, string $email, ?string $passwordHash = null): void
+    {
+        if ($passwordHash !== null) {
+            $stmt = $this->conn->prepare("UPDATE users SET name=?, email=?, password=? WHERE id=?");
+            $stmt->bind_param("sssi", $name, $email, $passwordHash, $userId);
+        } else {
+            $stmt = $this->conn->prepare("UPDATE users SET name=?, email=? WHERE id=?");
+            $stmt->bind_param("ssi", $name, $email, $userId);
+        }
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    public function getEmployees(int $companyId): array
+    {
+        $stmt = $this->conn->prepare("
+            SELECT u.id, u.name, u.email, w.phone_number_id
+            FROM users u
+            LEFT JOIN whatsapp_numbers w ON u.id = w.user_id
+            WHERE u.company_id = ?
+        ");
+        $stmt->bind_param("i", $companyId);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result;
+    }
+
     public function getWithPhoneNumbers(int $companyId): array
     {
         $stmt = $this->conn->prepare("
