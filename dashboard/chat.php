@@ -56,15 +56,6 @@ $tenantContext = TenantContext::fromSession();
 $csrfToken = generateConversationNoteCsrfToken();
 $savedReplyService = new SavedReplyService(new SavedReplyRepository($conn));
 $conversationNoteService = new ConversationNoteService(new ConversationNoteRepository($conn));
-$conn->query("CREATE TABLE IF NOT EXISTS saved_replies (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    company_id INT NOT NULL,
-    title VARCHAR(255) NOT NULL,
-    body TEXT NOT NULL,
-    created_by INT DEFAULT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    KEY company_id (company_id)
-)");
 $savedReplies = $savedReplyService->list($tenantContext);
 $conversationNotes = [];
 
