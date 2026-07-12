@@ -110,4 +110,75 @@ class ConversationRepository
         $stmt->execute();
         $stmt->close();
     }
+
+    private function buildIsolationClause(bool $isAdmin, int $userId, bool $hasCreatedBy = true): array
+    {
+        if ($isAdmin) {
+            return ['sql' => '', 'types' => '', 'params' => []];
+        }
+        if ($hasCreatedBy) {
+            $sql = " AND (c.created_by = ? OR c.id IN (
+                        SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
+                    )) ";
+            return ['sql' => $sql, 'types' => 'ii', 'params' => [$userId, $userId]];
+        }
+        $sql = " AND c.id IN (
+                    SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
+                ) ";
+        return ['sql' => $sql, 'types' => 'i', 'params' => [$userId]];
+    }
+
+    public function checkAccess(int $convId, int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true): bool
+    {
+        $iso    = $this->buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
+        $sql    = "SELECT c.id FROM conversations c WHERE c.id = ? AND c.company_id = ?" . $iso['sql'] . " LIMIT 1";
+        $stmt   = $this->db->prepare($sql);
+        $types  = 'ii' . $iso['types'];
+        $params = array_merge([$convId, $companyId], $iso['params']);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $ok = (bool) $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $ok;
+    }
+
+    public function getActiveConversation(int $convId, int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true): ?array
+    {
+        $iso = $this->buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
+        $sql = "SELECT c.* FROM conversations c WHERE c.id = ? AND c.company_id = ?" . $iso['sql'] . " LIMIT 1";
+        $stmt = $this->db->prepare($sql);
+        $types = 'ii' . $iso['types'];
+        $params = array_merge([$convId, $companyId], $iso['params']);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ?: null;
+    }
+
+    public function listWithDetails(int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true, int $limit = 50): array
+    {
+        $iso = $this->buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
+        $sql = "
+            SELECT c.id, c.contact_number, c.last_message_at, c.is_pinned,
+                (SELECT cm.body FROM chat_messages cm WHERE cm.conversation_id = c.id
+                    ORDER BY cm.sent_at DESC LIMIT 1) AS last_message,
+                (SELECT COUNT(*) FROM chat_messages cm WHERE cm.conversation_id = c.id
+                    AND cm.direction = 'in' AND cm.sent_at > IFNULL((SELECT MAX(cm2.sent_at)
+                        FROM chat_messages cm2 WHERE cm2.conversation_id = c.id AND cm2.direction = 'out'), '2000-01-01')
+                ) AS unread_count
+            FROM conversations c
+            WHERE c.company_id = ?" . $iso['sql'] . "
+            ORDER BY c.is_pinned DESC, c.last_message_at DESC
+            LIMIT ?
+        ";
+        $stmt = $this->db->prepare($sql);
+        $types = 'i' . $iso['types'] . 'i';
+        $params = array_merge([$companyId], $iso['params'], [$limit]);
+        $stmt->bind_param($types, ...$params);
+        $stmt->execute();
+        $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        return $result;
+    }
 }

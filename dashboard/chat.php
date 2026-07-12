@@ -68,41 +68,12 @@ $conn->query("CREATE TABLE IF NOT EXISTS saved_replies (
 $savedReplies = $savedReplyService->list($tenantContext);
 $conversationNotes = [];
 
-/**
- * Builds the WHERE clause fragment for conversation isolation by role.
- * Admin: sees all company conversations.
- * Employee: sees only conversations they created (created_by) or participated in (chat_messages.user_id).
- */
-function buildIsolationClause(bool $isAdmin, int $userId, bool $hasCreatedBy = true): array
-{
-    if ($isAdmin) {
-        return ['sql' => '', 'types' => '', 'params' => []];
-    }
-    if ($hasCreatedBy) {
-        $sql = " AND (c.created_by = ? OR c.id IN (
-                    SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
-                )) ";
-        return ['sql' => $sql, 'types' => 'ii', 'params' => [$userId, $userId]];
-    }
-    $sql = " AND c.id IN (
-                SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
-            ) ";
-    return ['sql' => $sql, 'types' => 'i', 'params' => [$userId]];
-}
+$convRepo = new ConversationRepository($conn);
 
 /** Checks whether the current user may access a given conversation. */
-function userCanAccessConversation(mysqli $conn, int $convId, int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true): bool
+function userCanAccessConversation(ConversationRepository $convRepo, int $convId, int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true): bool
 {
-    $iso    = buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
-    $sql    = "SELECT c.id FROM conversations c WHERE c.id = ? AND c.company_id = ?" . $iso['sql'] . " LIMIT 1";
-    $stmt   = $conn->prepare($sql);
-    $types  = 'ii' . $iso['types'];
-    $params = array_merge([$convId, $companyId], $iso['params']);
-    $stmt->bind_param($types, ...$params);
-    $stmt->execute();
-    $ok = (bool) $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    return $ok;
+    return $convRepo->checkAccess($convId, $companyId, $isAdmin, $userId, $hasCreatedBy);
 }
 
 // ── 1. Handle POST actions ──
@@ -147,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         $noteBody = trim($_POST['conversation_note_body'] ?? '');
         $convId = (int) ($_POST['conversation_id'] ?? 0);
-        if ($convId > 0 && $noteBody !== '' && userCanAccessConversation($conn, $convId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if ($convId > 0 && $noteBody !== '' && userCanAccessConversation($convRepo, $convId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $conversationNoteService->create($tenantContext, $convId, $noteBody, $userId);
         }
         header("Location: chat.php?conv=" . $convId);
@@ -164,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $noteBody = trim($_POST['conversation_note_body'] ?? '');
         if ($noteId > 0 && $noteBody !== '') {
             $note = $conversationNoteService->getById($tenantContext, $noteId);
-            if ($note && userCanAccessConversation($conn, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            if ($note && userCanAccessConversation($convRepo, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
                 $conversationNoteService->update($tenantContext, $noteId, $noteBody);
             }
         }
@@ -181,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $noteId = (int) ($_POST['conversation_note_id'] ?? 0);
         if ($noteId > 0) {
             $note = $conversationNoteService->getById($tenantContext, $noteId);
-            if ($note && userCanAccessConversation($conn, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            if ($note && userCanAccessConversation($convRepo, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
                 $conversationNoteService->delete($tenantContext, $noteId);
             }
         }
@@ -193,8 +164,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'toggle_pin') {
         $cId = (int) $_POST['conv_id'];
         $status = (int) $_POST['pin_status'];
-        if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            $convService = new ConversationService(new ConversationRepository($conn));
+        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $convService = new ConversationService($convRepo);
             $convService->updatePin($cId, $companyId, $status);
         }
         header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
@@ -205,8 +176,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'edit_chat') {
         $cId = (int) $_POST['conv_id'];
         $updatedNumber = trim($_POST['edit_number']);
-        if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            $convService = new ConversationService(new ConversationRepository($conn));
+        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $convService = new ConversationService($convRepo);
             $convService->updateContactNumber($cId, $companyId, $updatedNumber);
         }
         header("Location: chat.php?conv=" . $cId);
@@ -216,8 +187,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // حذف المحادثة بالكامل ورسائلها محلياً
     if ($action === 'delete_chat') {
         $cId = (int) $_POST['conv_id'];
-        if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
-            $convService = new ConversationService(new ConversationRepository($conn));
+        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $convService = new ConversationService($convRepo);
             $convService->delete($cId, $companyId);
         }
         header("Location: chat.php");
@@ -230,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $newBody = trim($_POST['message_body']);
         $cId = (int) $_GET['conv'];
 
-        if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
             $wamid = $chatMsgService->getWamid($msgId);
 
@@ -252,7 +223,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $msgId = (int) $_POST['message_id'];
         $cId = (int) $_GET['conv'];
 
-        if (userCanAccessConversation($conn, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
             $wamid = $chatMsgService->getWamid($msgId);
 
@@ -271,28 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 } // ✅ تم إغلاق قوس التحقق الرئيسي هنا بنجاح
 
 // ── 2. جلب المحادثات الجانبية (بدون JOIN يخفي المحادثات الجديدة/الفارغة) ──
-$iso = buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
-
-$convSql = "
-    SELECT c.id, c.contact_number, c.last_message_at, c.is_pinned,
-        (SELECT cm.body FROM chat_messages cm WHERE cm.conversation_id = c.id
-            ORDER BY cm.sent_at DESC LIMIT 1) AS last_message,
-        (SELECT COUNT(*) FROM chat_messages cm WHERE cm.conversation_id = c.id
-            AND cm.direction = 'in' AND cm.sent_at > IFNULL((SELECT MAX(cm2.sent_at)
-                FROM chat_messages cm2 WHERE cm2.conversation_id = c.id AND cm2.direction = 'out'), '2000-01-01')
-        ) AS unread_count
-    FROM conversations c
-    WHERE c.company_id = ?" . $iso['sql'] . "
-    ORDER BY c.is_pinned DESC, c.last_message_at DESC
-    LIMIT 50
-";
-$convStmt = $conn->prepare($convSql);
-$convTypes = 'i' . $iso['types'];
-$convParams = array_merge([$companyId], $iso['params']);
-$convStmt->bind_param($convTypes, ...$convParams);
-$convStmt->execute();
-$conversations = $convStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-$convStmt->close();
+$conversations = $convRepo->listWithDetails($companyId, $isAdmin, $userId, $hasCreatedBy, 50);
 
 $activeConvId = isset($_GET['conv']) ? (int) $_GET['conv'] : ($conversations[0]['id'] ?? 0);
 $activeConv = null;
@@ -300,14 +250,7 @@ $initMessages = [];
 
 // ── 3. جلب الرسائل (نفس شرط العزل حتى لا يفتح الموظف محادثة غيره عبر الرابط) ──
 if ($activeConvId > 0) {
-    $acSql = "SELECT c.* FROM conversations c WHERE c.id = ? AND c.company_id = ?" . $iso['sql'] . " LIMIT 1";
-    $acStmt = $conn->prepare($acSql);
-    $acTypes = 'ii' . $iso['types'];
-    $acParams = array_merge([$activeConvId, $companyId], $iso['params']);
-    $acStmt->bind_param($acTypes, ...$acParams);
-    $acStmt->execute();
-    $activeConv = $acStmt->get_result()->fetch_assoc();
-    $acStmt->close();
+    $activeConv = $convRepo->getActiveConversation($activeConvId, $companyId, $isAdmin, $userId, $hasCreatedBy);
 
     if ($activeConv) {
         $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
