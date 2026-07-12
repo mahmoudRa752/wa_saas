@@ -79,8 +79,15 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
             } else {
 
-                $spreadsheet = IOFactory::load($_FILES['excel_file']['tmp_name']);
-                $sheet = $spreadsheet->getActiveSheet();
+                $fileTmp = $_FILES['excel_file']['tmp_name'];
+                $fileName = $_FILES['excel_file']['name'];
+                $fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+
+                if ($fileExt !== 'xlsx' && $fileExt !== 'csv') {
+                    $error = "❌ Invalid file type. Please upload .xlsx or .csv files only.";
+                } else {
+                    $spreadsheet = IOFactory::load($fileTmp);
+                    $sheet = $spreadsheet->getActiveSheet();
                 $rows = $sheet->toArray();
 
                 $headers = $rows[0];
@@ -101,6 +108,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 }
 
                 $success = "✅ Bulk messages processed!";
+                }
             }
         }
     }

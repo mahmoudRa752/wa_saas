@@ -31,18 +31,17 @@ if (!isset($_SESSION['company_id'])) {
     exit;
 }
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 function generateConversationNoteCsrfToken(): string
 {
-    if (empty($_SESSION['conversation_note_csrf'])) {
-        $_SESSION['conversation_note_csrf'] = bin2hex(random_bytes(32));
-    }
-
-    return $_SESSION['conversation_note_csrf'];
+    return CsrfHelper::generateToken('conversation_note');
 }
 
 function validateConversationNoteCsrfToken(?string $token): bool
 {
-    return is_string($token) && hash_equals($_SESSION['conversation_note_csrf'] ?? '', $token);
+    return CsrfHelper::validateToken($token, 'conversation_note');
 }
 
 $companyId    = (int) $_SESSION['company_id'];
