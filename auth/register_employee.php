@@ -2,8 +2,10 @@
 session_start();
 require_once("../config/db.php");
 require_once(__DIR__ . '/../core/Auth/AuthRepository.php');
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
 
 use Core\Auth\AuthRepository;
+use Core\Company\CompanyRepository;
 
 // إذا كان المستخدم مسجل دخوله بالفعل، يتم توجيهه للـ Dashboard فوراً
 if (isset($_SESSION['company_id'])) {
@@ -18,16 +20,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
     $company_code = trim($_POST['company_code']);
     $authRepo = new AuthRepository($conn);
+    $companyRepo = new CompanyRepository($conn);
 
     // نبحث عن الشركة بالكود
-    $stmt = $conn->prepare("SELECT id FROM companies WHERE company_code = ?");
-    $stmt->bind_param("s", $company_code);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $company = $companyRepo->findByCompanyCode($company_code);
 
-    if ($result->num_rows > 0) {
-
-        $company = $result->fetch_assoc();
+    if ($company) {
         $company_id = $company['id'];
 
         $newId = $authRepo->createEmployee($name, $email, $password, $company_id);

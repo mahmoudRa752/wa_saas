@@ -37,8 +37,28 @@ class CompanyRepository
 
     public function getById(int $companyId): ?array
     {
-        $stmt = $this->conn->prepare("SELECT name, email, logo FROM companies WHERE id = ?");
+        $stmt = $this->conn->prepare("SELECT * FROM companies WHERE id = ?");
         $stmt->bind_param("i", $companyId);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ?: null;
+    }
+
+    public function findByEmail(string $email): ?array
+    {
+        $stmt = $this->conn->prepare("SELECT * FROM companies WHERE email = ?");
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ?: null;
+    }
+
+    public function findByCompanyCode(string $companyCode): ?array
+    {
+        $stmt = $this->conn->prepare("SELECT id FROM companies WHERE company_code = ?");
+        $stmt->bind_param("s", $companyCode);
         $stmt->execute();
         $row = $stmt->get_result()->fetch_assoc();
         $stmt->close();

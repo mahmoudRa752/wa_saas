@@ -1,20 +1,18 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Employee/EmployeeRepository.php');
+use Core\Employee\EmployeeRepository;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     $email = trim($_POST['email']);
     $password = $_POST['password'];
 
-    $stmt = $conn->prepare("SELECT * FROM users WHERE email = ?");
-    $stmt->bind_param("s", $email);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $employeeRepo = new EmployeeRepository($conn);
+    $user = $employeeRepo->findByEmail($email);
 
-    if ($result->num_rows > 0) {
-
-        $user = $result->fetch_assoc();
+    if ($user) {
 
         if (password_verify($password, $user['password'])) {
 

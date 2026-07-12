@@ -73,6 +73,16 @@ class EmployeeRepository
         return $exists;
     }
 
+    public function findByEmail(string $email): ?array
+    {
+        $stmt = $this->conn->prepare("SELECT * FROM users WHERE email = ?");
+        $stmt->bind_param("s", $email);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+        return $row ?: null;
+    }
+
     public function create(int $companyId, string $name, string $email, string $passwordHash): int
     {
         $stmt = $this->conn->prepare("
