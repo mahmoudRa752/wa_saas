@@ -20,7 +20,14 @@ if (!$company) {
     die("Company not found.");
 }
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'company_profile')) {
+        die("Invalid CSRF Token.");
+    }
 
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
@@ -46,6 +53,7 @@ include("../layouts/header.php");
         <?php endif; ?>
 
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('company_profile'); ?>">
 
             <div class="mb-3">
                 <label>Company Name</label>

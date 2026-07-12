@@ -19,8 +19,15 @@ $waNumRepo = new WhatsAppNumberRepository($conn);
 // جلب موظفي الشركة
 $employeesList = $empRepo->getEmployees($company_id);
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 // إضافة رقم واتساب
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'whatsapp_numbers')) {
+        die("Invalid CSRF Token.");
+    }
 
     $user_id = (int)$_POST['user_id'];
     $phone_number_id = trim($_POST['phone_number_id']);
@@ -49,6 +56,7 @@ include("../layouts/header.php");
         <?php endif; ?>
 
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('whatsapp_numbers'); ?>">
 
             <div class="mb-3">
                 <label>Select Employee</label>

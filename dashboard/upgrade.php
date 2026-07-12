@@ -14,7 +14,14 @@ $company_id = $_SESSION['company_id'];
 $subRepo = new SubscriptionRepository($conn);
 $plans_arr = $subRepo->getAllPlans();
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'upgrade')) {
+        die("Invalid CSRF Token.");
+    }
     $plan_id = intval($_POST['plan_id']);
     $start   = date("Y-m-d");
     $end     = date("Y-m-d", strtotime("+30 days"));
@@ -78,6 +85,7 @@ include("../layouts/header.php");
             </ul>
 
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('upgrade'); ?>">
                 <input type="hidden" name="plan_id" value="<?php echo $plan['id']; ?>">
                 <button class="btn <?php echo $featured ? 'btn-primary' : 'btn-outline-primary'; ?> w-100">
                     Choose <?php echo htmlspecialchars($plan['name']); ?>

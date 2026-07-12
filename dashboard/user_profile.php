@@ -14,7 +14,14 @@ $user_id = $_SESSION['user_id'];
 $empRepo = new EmployeeRepository($conn);
 $user = $empRepo->getById($user_id);
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'user_profile')) {
+        die("Invalid CSRF Token.");
+    }
 
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
@@ -37,6 +44,7 @@ include("../layouts/header.php");
         <?php endif; ?>
 
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('user_profile'); ?>">
 
             <div class="mb-3">
                 <label>Name</label>

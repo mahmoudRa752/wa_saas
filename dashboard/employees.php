@@ -27,10 +27,17 @@ if (isset($_GET['delete'])) {
     exit;
 }
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 /* ============================
    ✅ تعديل موظف
 ============================ */
 if (isset($_POST['update'])) {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'employees')) {
+        die("Invalid CSRF Token.");
+    }
 
     $user_id = intval($_POST['user_id']);
     $name = trim($_POST['name']);
@@ -47,6 +54,10 @@ if (isset($_POST['update'])) {
    ✅ إضافة موظف
 ============================ */
 if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_POST['update'])) {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'employees')) {
+        die("Invalid CSRF Token.");
+    }
 
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
@@ -89,6 +100,7 @@ include("../layouts/header.php");
                 <h5>Add Employee</h5>
 
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('employees'); ?>">
                     <input type="text" name="name" class="form-control mb-2" placeholder="Name" required>
                     <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
                     <input type="password" name="password" class="form-control mb-2" placeholder="Password" required>
@@ -148,6 +160,7 @@ include("../layouts/header.php");
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('employees'); ?>">
                     <div class="modal-header">
                         <h5 class="modal-title">Edit Employee</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
