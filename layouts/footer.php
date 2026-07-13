@@ -28,6 +28,9 @@ function escapeHtml(str) {
 }
 
 function playBeepSound() {
+    if (localStorage.getItem('muteAudioNotifications') === '1') {
+        return;
+    }
     try {
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         

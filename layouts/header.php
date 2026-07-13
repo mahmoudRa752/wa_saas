@@ -56,9 +56,8 @@ $titles = [
         'employees.php'        => 'Employees',
         'employee_performance.php' => 'Employee Performance',
         'audit_logs.php'       => 'Audit Logs',
-        'whatsapp_numbers.php' => 'WhatsApp Numbers',
+        'settings.php'         => 'Settings',
         'upgrade.php'          => 'Upgrade Plan',
-        'company_profile.php'  => 'Company Profile',
         'user_profile.php'     => 'My Profile',
 ];
 $pageTitle = $titles[$currentPage] ?? 'WA Manager';
@@ -288,22 +287,22 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
                 <a href="/wa_saas/dashboard/audit_logs.php" class="nav-link <?php echo $currentPage === 'audit_logs.php' ? 'active' : ''; ?>">
                     <span class="nav-icon"><i class="bi bi-shield-check"></i></span> Audit Logs
                 </a>
-                <a href="/wa_saas/dashboard/whatsapp_numbers.php" class="nav-link <?php echo $currentPage === 'whatsapp_numbers.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon"><i class="bi bi-phone-fill"></i></span> WA Numbers
-                </a>
                 <a href="/wa_saas/dashboard/upgrade.php" class="nav-link <?php echo $currentPage === 'upgrade.php' ? 'active' : ''; ?>">
                     <span class="nav-icon"><i class="bi bi-lightning-charge-fill"></i></span> Upgrade Plan
                 </a>
                 <div class="nav-section-title">Settings</div>
-                <a href="/wa_saas/dashboard/company_profile.php" class="nav-link <?php echo $currentPage === 'company_profile.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon"><i class="bi bi-building-fill"></i></span> Company Profile
+                <a href="/wa_saas/dashboard/settings.php" class="nav-link <?php echo $currentPage === 'settings.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-gear-fill"></i></span> System Settings
                 </a>
             <?php endif; ?>
 
             <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'employee'): ?>
                 <div class="nav-section-title">Account</div>
                 <a href="/wa_saas/dashboard/user_profile.php" class="nav-link <?php echo $currentPage === 'user_profile.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon"><i class="bi bi-person-circle"></i></span> My Profile
+                    <span class="nav-icon"><i class="bi bi-person-bounding-box"></i></span> My Profile
+                </a>
+                <a href="/wa_saas/dashboard/settings.php" class="nav-link <?php echo $currentPage === 'settings.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-gear-fill"></i></span> Preferences & Roles
                 </a>
             <?php endif; ?>
         </nav>
