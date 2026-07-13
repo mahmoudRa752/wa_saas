@@ -838,6 +838,9 @@ include("../layouts/header.php");
             <div class="saved-reply-modal-body">
                 <input type="text" name="saved_reply_title" placeholder="Reply title" required>
                 <textarea name="saved_reply_body" rows="5" placeholder="Reply text" required></textarea>
+                <div style="font-size:11px; color:#64748b; margin-top:4px; line-height:1.4;">
+                    Tip: You can use dynamic variables like `{contact_number}`, `{my_name}`, and `{company_name}` in the text.
+                </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px;">
                 <button type="button" onclick="toggleModal('savedReplyModal')" style="padding:6px 12px; border-radius:6px; background:#eee; border:none;">Cancel</button>
@@ -960,8 +963,16 @@ function filterConversations() {
 }
 function insertSavedReply(button) {
     const input = document.getElementById('msgInput');
-    const body = button.getAttribute('data-body') || '';
+    let body = button.getAttribute('data-body') || '';
     if (input) {
+        const contactNumber = "<?php echo isset($activeConv) ? htmlspecialchars($activeConv['contact_number']) : ''; ?>";
+        const myName = "<?php echo htmlspecialchars($_SESSION['user_name'] ?? 'Agent'); ?>";
+        const companyName = "<?php echo htmlspecialchars($_SESSION['company_name'] ?? 'Company'); ?>";
+        
+        body = body.replace(/{contact_number}/gi, contactNumber);
+        body = body.replace(/{my_name}/gi, myName);
+        body = body.replace(/{company_name}/gi, companyName);
+        
         input.value = body;
         input.focus();
         input.dispatchEvent(new Event('input'));
