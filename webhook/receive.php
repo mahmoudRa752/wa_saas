@@ -84,6 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
                 $convService->touch($convId);
+                $conn->query("UPDATE conversations SET last_incoming_at = NOW(), sla_status = 'warning' WHERE id = " . (int)$convId);
 
                 // ── Automation Rules Trigger ──
                 $rulesStmt = $conn->prepare("SELECT * FROM automation_rules WHERE company_id = ? AND is_active = 1");

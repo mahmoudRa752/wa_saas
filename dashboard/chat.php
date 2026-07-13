@@ -583,6 +583,15 @@ include("../layouts/header.php");
                             <div class="conv-name">
                                 <?php echo htmlspecialchars($conv['contact_number']); ?>
                                 <span class="badge <?php echo $badgeClass; ?>" style="font-size:9px; padding: 2px 4px;"><?php echo htmlspecialchars(ucfirst($st)); ?></span>
+                                <?php
+                                if (!empty($conv['last_incoming_at'])) {
+                                    $waitingSeconds = time() - strtotime($conv['last_incoming_at']);
+                                    $waitingMinutes = max(0, round($waitingSeconds / 60));
+                                    $slaClass = ($waitingMinutes >= 60) ? 'bg-danger text-white' : 'bg-warning text-dark';
+                                    $slaText = ($waitingMinutes >= 60) ? 'Breached ' . round($waitingMinutes / 60, 1) . 'h' : 'SLA ' . $waitingMinutes . 'm';
+                                    echo '<span class="badge ' . $slaClass . ' ms-1" style="font-size:9px; padding: 2px 4px;" title="Customer waiting duration"><i class="bi bi-clock me-1"></i>' . $slaText . '</span>';
+                                }
+                                ?>
                                 <?php if ($conv['is_pinned']): ?>
                                     <i class="bi bi-pin-angle-fill text-secondary fs-6" title="Pinned"></i>
                                 <?php endif; ?>

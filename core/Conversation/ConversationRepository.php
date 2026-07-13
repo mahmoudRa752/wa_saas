@@ -213,7 +213,7 @@ class ConversationRepository
         }
 
         $sql = "
-            SELECT c.id, c.contact_number, c.last_message_at, c.is_pinned, c.status, c.assigned_to,
+            SELECT c.id, c.contact_number, c.last_message_at, c.is_pinned, c.status, c.assigned_to, c.sla_status, c.last_incoming_at,
                 (SELECT cm.body FROM chat_messages cm WHERE cm.conversation_id = c.id
                     ORDER BY cm.sent_at DESC LIMIT 1) AS last_message,
                 (SELECT COUNT(*) FROM chat_messages cm WHERE cm.conversation_id = c.id

@@ -153,6 +153,7 @@ $newMsgId = $chatMsgService->insertMessage(
 
 // تحديث وقت آخر رسالة في المحادثة (via ConversationService)
 $convService->touch($conversationId);
+$conn->query("UPDATE conversations SET last_incoming_at = NULL, sla_status = 'normal' WHERE id = " . (int)$conversationId);
 
 echo json_encode([
     'success'       => true,
