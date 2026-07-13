@@ -29,3 +29,6 @@ jobs:
     - name: Run PHP Syntax Check (Lint)
       run: |
         find . -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n 1 -P 4 php -l
+
+    - name: Run Test Suite
+      run: php tests/TestRunner.php
