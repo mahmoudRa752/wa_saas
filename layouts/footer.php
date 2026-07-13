@@ -1,5 +1,13 @@
 <?php if (isset($_SESSION['company_id'])): ?>
-    </div></div></div><?php else: ?>
+    </div></div></div>
+    <?php
+    // Lazy cron trigger for background broadcasts (runs asynchronously on Windows)
+    $chkQuery = $conn->query("SELECT id FROM broadcast_campaigns WHERE status = 'scheduled' AND scheduled_at <= NOW() LIMIT 1");
+    if ($chkQuery && $chkQuery->num_rows > 0) {
+        pclose(popen("start /B php " . escapeshellarg(__DIR__ . '/../cron/process_broadcasts.php'), "r"));
+    }
+    ?>
+<?php else: ?>
     </div></div><?php endif; ?>
 
 <footer class="app-footer text-center py-3 text-muted border-top bg-white mt-auto" style="font-size: 0.875rem;">

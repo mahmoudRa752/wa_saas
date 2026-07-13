@@ -48,6 +48,7 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 $titles = [
         'index.php'            => 'Dashboard',
         'send.php'             => 'Send Message',
+        'broadcasts.php'       => 'Broadcast Campaigns',
         'chat.php'             => 'Live Chat',
         'internal_chat.php'    => 'Internal Chat',
         'employees.php'        => 'Employees',
@@ -255,6 +256,9 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
             </a>
             <a href="/wa_saas/dashboard/send.php" class="nav-link <?php echo $currentPage === 'send.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-send-fill"></i></span> Send Message
+            </a>
+            <a href="/wa_saas/dashboard/broadcasts.php" class="nav-link <?php echo $currentPage === 'broadcasts.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-broadcast"></i></span> Broadcast Campaigns
             </a>
             <a href="/wa_saas/dashboard/chat.php" class="nav-link <?php echo $currentPage === 'chat.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-chat-dots-fill"></i></span> Live Chat
