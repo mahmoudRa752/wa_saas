@@ -23,6 +23,10 @@ if (isset($_GET['delete'])) {
     $empRepo->deletePhoneNumbers($id);
     $empRepo->delete($id, $company_id);
 
+    require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+    $auditService = new \Core\Services\AuditLogService($conn);
+    $auditService->log($company_id, $_SESSION['user_id'] ?? null, 'delete_employee', "Deleted employee ID $id");
+
     header("Location: employees.php");
     exit;
 }
@@ -46,6 +50,10 @@ if (isset($_POST['update'])) {
 
     $empRepo->update($user_id, $company_id, $name, $email);
     $empRepo->upsertPhoneNumber($user_id, $phone_number_id);
+
+    require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+    $auditService = new \Core\Services\AuditLogService($conn);
+    $auditService->log($company_id, $_SESSION['user_id'] ?? null, 'update_employee', "Updated employee '$name' (ID $user_id)");
 
     $success = "✅ Employee updated successfully!";
 }
@@ -72,6 +80,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_POST['update'])) {
             if (!empty($phone_number_id)) {
                 $empRepo->upsertPhoneNumber($user_id, $phone_number_id);
             }
+            
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($company_id, $_SESSION['user_id'] ?? null, 'create_employee', "Created employee '$name' (ID $user_id)");
+            
             $success = "✅ Employee added successfully!";
         }
     }

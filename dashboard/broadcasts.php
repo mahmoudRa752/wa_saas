@@ -93,6 +93,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
         $stmt->bind_param("iissssi", $companyId, $creatorId, $name, $messageText, $recipientsString, $scheduledAt, $totalContacts);
         if ($stmt->execute()) {
             $success = "✅ Broadcast Campaign scheduled successfully!";
+
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($companyId, $userId, 'schedule_broadcast', "Scheduled broadcast campaign '$name' to $totalContacts recipients");
         } else {
             $error = "Failed to schedule campaign: " . $stmt->error;
         }

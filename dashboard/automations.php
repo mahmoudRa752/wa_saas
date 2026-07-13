@@ -37,6 +37,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
         $stmt->bind_param("issss", $companyId, $name, $triggerType, $keyword, $replyText);
         if ($stmt->execute()) {
             $success = "✅ Automation Rule added successfully!";
+
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($companyId, $_SESSION['user_id'] ?? null, 'create_automation', "Created auto-reply rule '$name'");
         } else {
             $error = "Failed to create rule: " . $stmt->error;
         }
@@ -58,6 +62,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
         $stmt->bind_param("iii", $newStatus, $ruleId, $companyId);
         if ($stmt->execute()) {
             $success = "✅ Automation Rule updated!";
+
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($companyId, $_SESSION['user_id'] ?? null, 'toggle_automation', "Toggled auto-reply rule ID $ruleId status to " . ($newStatus ? 'active' : 'inactive'));
         }
         $stmt->close();
     }

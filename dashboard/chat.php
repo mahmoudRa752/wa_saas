@@ -230,6 +230,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if ($convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $convService = new ConversationService($convRepo);
             $convService->updateAssignee($cId, $companyId, $assignedTo);
+
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($companyId, $_SESSION['user_id'] ?? null, 'assign_chat', "Assigned conversation ID $cId to employee ID " . ($assignedTo ?? 'unassigned'));
         }
         header("Location: chat.php?conv=" . $cId);
         exit;
@@ -242,6 +246,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         if (in_array($status, ['open', 'pending', 'closed']) && $convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $convService = new ConversationService($convRepo);
             $convService->updateStatus($cId, $companyId, $status);
+
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($companyId, $_SESSION['user_id'] ?? null, 'status_change', "Updated conversation ID $cId status to $status");
         }
         header("Location: chat.php?conv=" . $cId);
         exit;
@@ -307,6 +315,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $stmt->bind_param("iss", $companyId, $segmentName, $criteriaJson);
             $stmt->execute();
             $stmt->close();
+
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($companyId, $_SESSION['user_id'] ?? null, 'create_segment', "Created smart filter segment: $segmentName");
         }
         header("Location: chat.php");
         exit;
