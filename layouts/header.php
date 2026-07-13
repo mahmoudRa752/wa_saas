@@ -1,9 +1,19 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
 require_once(__DIR__ . "/../config/db.php");
+require_once(__DIR__ . "/../core/Auth/SecurityHelper.php");
+require_once(__DIR__ . "/../core/Auth/RateLimiter.php");
 require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
 
+use Core\Auth\SecurityHelper;
+use Core\Auth\RateLimiter;
 use Core\Company\CompanyRepository;
+
+SecurityHelper::enforceHeaders();
+if (!RateLimiter::check('dashboard', 100, 60)) {
+    http_response_code(429);
+    die("Too Many Requests. Please slow down.");
+}
 
 $companyLogo = null;
 if (isset($_SESSION['company_id'])) {
