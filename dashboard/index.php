@@ -19,46 +19,105 @@ $usageService = new UsageService($conn);
 $companyRepo = new CompanyRepository($conn);
 $msgLogRepo = new MessageLogRepository($conn);
 
-// إجمالي الرسائل
+// Standard metrics
 $totalMessages = $msgLogRepo->getTotalMessagesForCompany($company_id);
-
-// رسائل هذا الشهر
 $usageSummary = $usageService->getSubscriptionUsageSummary($company_id);
 $monthlyMessages = $usageSummary['monthlyMessages'];
-
-// عدد الموظفين
 $totalEmployees = $companyRepo->getTotalEmployees($company_id);
-
-// الاشتراك الحالي
 $planName = $usageSummary['planName'];
 $limit    = $usageSummary['limit'];
 $endDate  = $usageSummary['endDate'];
 $usagePercent = $usageSummary['usagePercent'];
 
-// آخر 5 رسائل
+// Recent activity
 $recentMessagesList = $msgLogRepo->getRecentMessagesForCompany($company_id, 5);
+
+// ── NEW ADVANCED ANALYTICS QUERIES ──
+
+// 1. Conversation status counts
+$statusCounts = ['open' => 0, 'pending' => 0, 'closed' => 0];
+$stmt = $conn->prepare("SELECT status, COUNT(*) as count FROM conversations WHERE company_id = ? GROUP BY status");
+$stmt->bind_param("i", $company_id);
+$stmt->execute();
+$res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+foreach ($res as $row) {
+    if (isset($statusCounts[$row['status']])) {
+        $statusCounts[$row['status']] = (int) $row['count'];
+    }
+}
+$stmt->close();
+$totalConversations = array_sum($statusCounts);
+
+// 2. Sent vs Failed messages over the last 7 days
+$dailyStats = [];
+for ($i = 6; $i >= 0; $i--) {
+    $dateStr = date('Y-m-d', strtotime("-$i days"));
+    $dailyStats[$dateStr] = ['sent' => 0, 'failed' => 0];
+}
+
+$stmt = $conn->prepare("
+    SELECT DATE(m.sent_at) as date,
+           SUM(CASE WHEN m.status = 'sent' THEN 1 ELSE 0 END) as sent_count,
+           SUM(CASE WHEN m.status = 'failed' THEN 1 ELSE 0 END) as failed_count
+    FROM messages m
+    JOIN users u ON m.user_id = u.id
+    WHERE u.company_id = ? AND m.sent_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY)
+    GROUP BY DATE(m.sent_at)
+    ORDER BY DATE(m.sent_at) ASC
+");
+$stmt->bind_param("i", $company_id);
+$stmt->execute();
+$res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+foreach ($res as $row) {
+    if (isset($dailyStats[$row['date']])) {
+        $dailyStats[$row['date']]['sent'] = (int) $row['sent_count'];
+        $dailyStats[$row['date']]['failed'] = (int) $row['failed_count'];
+    }
+}
+$stmt->close();
+
+$chartDates = array_keys($dailyStats);
+$chartSent = array_column($dailyStats, 'sent');
+$chartFailed = array_column($dailyStats, 'failed');
+
+// 3. Employee message volumes (productivity check)
+$stmt = $conn->prepare("
+    SELECT u.name, COUNT(m.id) as message_count
+    FROM users u
+    LEFT JOIN messages m ON u.id = m.user_id
+    WHERE u.company_id = ?
+    GROUP BY u.id
+    ORDER BY message_count DESC
+    LIMIT 6
+");
+$stmt->bind_param("i", $company_id);
+$stmt->execute();
+$empStats = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+$empNames = array_column($empStats, 'name');
+$empMessageCounts = array_column($empStats, 'message_count');
 
 include("../layouts/header.php");
 ?>
 
 <!-- KPI Cards -->
 <div class="row g-3 mb-4">
-
     <div class="col-md-3 col-sm-6">
         <div class="kpi-card kpi-purple fade-in">
             <div class="kpi-bg"></div>
             <div class="kpi-icon"><i class="bi bi-chat-dots"></i></div>
             <div class="kpi-value"><?php echo number_format($totalMessages); ?></div>
-            <div class="kpi-label">Total Messages</div>
+            <div class="kpi-label">Total Messages Sent</div>
         </div>
     </div>
 
     <div class="col-md-3 col-sm-6">
         <div class="kpi-card kpi-blue fade-in" style="animation-delay:.05s">
             <div class="kpi-bg"></div>
-            <div class="kpi-icon"><i class="bi bi-calendar-check"></i></div>
-            <div class="kpi-value"><?php echo number_format($monthlyMessages); ?></div>
-            <div class="kpi-label">This Month</div>
+            <div class="kpi-icon"><i class="bi bi-chat-left-text"></i></div>
+            <div class="kpi-value"><?php echo number_format($totalConversations); ?></div>
+            <div class="kpi-label">Conversations (<?php echo $statusCounts['open']; ?> Open)</div>
         </div>
     </div>
 
@@ -67,7 +126,7 @@ include("../layouts/header.php");
             <div class="kpi-bg"></div>
             <div class="kpi-icon"><i class="bi bi-people"></i></div>
             <div class="kpi-value"><?php echo $totalEmployees; ?></div>
-            <div class="kpi-label">Employees</div>
+            <div class="kpi-label">Active Employees</div>
         </div>
     </div>
 
@@ -81,17 +140,53 @@ include("../layouts/header.php");
             </div>
         </div>
     </div>
+</div>
 
+<!-- Charts Row -->
+<div class="row g-3 mb-4">
+    <!-- Chart 1: Messages History -->
+    <div class="col-md-6 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
+            <h6 class="fw-bold mb-3"><i class="bi bi-graph-up me-2 text-primary"></i>Message History (Last 7 Days)</h6>
+            <div style="position: relative; height: 260px; width: 100%;">
+                <canvas id="messagesHistoryChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart 2: Status & Employees -->
+    <div class="col-md-3 col-sm-6 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
+            <h6 class="fw-bold mb-3"><i class="bi bi-pie-chart me-2 text-success"></i>Statuses</h6>
+            <div style="position: relative; height: 180px; width: 100%;" class="d-flex justify-content-center align-items-center">
+                <canvas id="statusChart"></canvas>
+            </div>
+            <div class="mt-3 text-center" style="font-size:12px; color:#64748b;">
+                <span class="me-2"><i class="bi bi-circle-fill text-success"></i> Open</span>
+                <span class="me-2"><i class="bi bi-circle-fill text-warning"></i> Pending</span>
+                <span><i class="bi bi-circle-fill text-secondary"></i> Closed</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart 3: Employee Productivity -->
+    <div class="col-md-3 col-sm-6 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
+            <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart me-2 text-warning"></i>Leaderboard</h6>
+            <div style="position: relative; height: 220px; width: 100%;">
+                <canvas id="employeeProductivityChart"></canvas>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Usage + Recent -->
 <div class="row g-3">
-
     <!-- Usage Bar -->
-    <div class="col-md-5">
-        <div class="card p-4 h-100">
+    <div class="col-md-5 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
             <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0">Monthly Usage</h6>
+                <h6 class="fw-bold mb-0">Monthly Limit Usage</h6>
                 <a href="upgrade.php" class="btn btn-outline-primary btn-sm">
                     <i class="bi bi-lightning-charge me-1"></i> Upgrade
                 </a>
@@ -102,8 +197,8 @@ include("../layouts/header.php");
                     <span><?php echo number_format($monthlyMessages); ?> used</span>
                     <span><?php echo number_format($limit); ?> limit</span>
                 </div>
-                <div class="progress mb-2">
-                    <div class="progress-bar <?php echo $usagePercent >= 90 ? 'danger' : ''; ?>"
+                <div class="progress mb-2" style="height:10px;">
+                    <div class="progress-bar <?php echo $usagePercent >= 90 ? 'bg-danger' : 'bg-primary'; ?>"
                          style="width:<?php echo $usagePercent; ?>%"></div>
                 </div>
                 <div class="d-flex justify-content-between" style="font-size:12px; color:#94a3b8;">
@@ -126,16 +221,16 @@ include("../layouts/header.php");
     </div>
 
     <!-- Recent Activity -->
-    <div class="col-md-7">
-        <div class="card h-100">
-            <div class="card-header-custom d-flex align-items-center justify-content-between pb-3">
-                <span>Recent Activity</span>
+    <div class="col-md-7 col-12">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-white d-flex align-items-center justify-content-between pb-3 pt-4 px-4 border-0">
+                <h6 class="fw-bold mb-0">Recent Outbound Activity</h6>
                 <a href="send.php" class="btn btn-primary btn-sm">
                     <i class="bi bi-send me-1"></i> Send New
                 </a>
             </div>
 
-            <div class="px-3 pb-3">
+            <div class="px-4 pb-4">
                 <?php if (!empty($recentMessagesList)): ?>
                     <table class="table-custom w-100">
                         <thead>
@@ -175,7 +270,101 @@ include("../layouts/header.php");
             </div>
         </div>
     </div>
-
 </div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    // 1. Messages History Chart (Line Chart)
+    const ctxHistory = document.getElementById('messagesHistoryChart').getContext('2d');
+    new Chart(ctxHistory, {
+        type: 'line',
+        data: {
+            labels: <?php echo json_encode(array_map(function($d) { return date('M d', strtotime($d)); }, $chartDates)); ?>,
+            datasets: [
+                {
+                    label: 'Sent',
+                    data: <?php echo json_encode($chartSent); ?>,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                },
+                {
+                    label: 'Failed',
+                    data: <?php echo json_encode($chartFailed); ?>,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top' }
+            },
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
+        }
+    });
+
+    // 2. Status Chart (Doughnut Chart)
+    const ctxStatus = document.getElementById('statusChart').getContext('2d');
+    new Chart(ctxStatus, {
+        type: 'doughnut',
+        data: {
+            labels: ['Open', 'Pending', 'Closed'],
+            datasets: [{
+                data: [
+                    <?php echo $statusCounts['open']; ?>,
+                    <?php echo $statusCounts['pending']; ?>,
+                    <?php echo $statusCounts['closed']; ?>
+                ],
+                backgroundColor: ['#10b981', '#f59e0b', '#64748b'],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+
+    // 3. Employee Productivity Chart (Horizontal Bar Chart)
+    const ctxEmp = document.getElementById('employeeProductivityChart').getContext('2d');
+    new Chart(ctxEmp, {
+        type: 'bar',
+        data: {
+            labels: <?php echo json_encode($empNames); ?>,
+            datasets: [{
+                label: 'Messages',
+                data: <?php echo json_encode($empMessageCounts); ?>,
+                backgroundColor: '#6366f1',
+                borderRadius: 5
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
+        }
+    });
+});
+</script>
 
 <?php include("../layouts/footer.php"); ?>
