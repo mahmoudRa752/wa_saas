@@ -25,7 +25,9 @@ class Conversation
         public readonly string  $lastMessageAt,
         public readonly string  $createdAt,
         public readonly bool    $isPinned,
-        public readonly ?int    $createdBy
+        public readonly ?int    $createdBy,
+        public readonly ?int    $assignedTo,
+        public readonly string  $status
     ) {}
 
     public static function fromRow(array $row): self
@@ -37,7 +39,9 @@ class Conversation
             lastMessageAt: (string) $row['last_message_at'],
             createdAt:     (string) ($row['created_at'] ?? $row['last_message_at']),
             isPinned:      (bool)   ($row['is_pinned'] ?? false),
-            createdBy:     isset($row['created_by']) ? (int) $row['created_by'] : null
+            createdBy:     isset($row['created_by']) ? (int) $row['created_by'] : null,
+            assignedTo:    isset($row['assigned_to']) ? (int) $row['assigned_to'] : null,
+            status:        (string) ($row['status'] ?? 'open')
         );
     }
 }

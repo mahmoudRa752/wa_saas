@@ -111,21 +111,48 @@ class ConversationRepository
         $stmt->close();
     }
 
+    /**
+     * Update conversation status.
+     */
+    public function updateStatus(int $id, int $companyId, string $status): void
+    {
+        $stmt = $this->db->prepare('UPDATE conversations SET status = ? WHERE id = ? AND company_id = ?');
+        $stmt->bind_param('sii', $status, $id, $companyId);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    /**
+     * Update conversation assignee.
+     */
+    public function updateAssignee(int $id, int $companyId, ?int $assignedTo): void
+    {
+        if ($assignedTo === null || $assignedTo <= 0) {
+            $stmt = $this->db->prepare('UPDATE conversations SET assigned_to = NULL WHERE id = ? AND company_id = ?');
+            $stmt->bind_param('ii', $id, $companyId);
+        } else {
+            $stmt = $this->db->prepare('UPDATE conversations SET assigned_to = ? WHERE id = ? AND company_id = ?');
+            $stmt->bind_param('iii', $assignedTo, $id, $companyId);
+        }
+        $stmt->execute();
+        $stmt->close();
+    }
+
     private function buildIsolationClause(bool $isAdmin, int $userId, bool $hasCreatedBy = true): array
     {
         if ($isAdmin) {
             return ['sql' => '', 'types' => '', 'params' => []];
         }
         if ($hasCreatedBy) {
-            $sql = " AND (c.created_by = ? OR c.id IN (
+            $sql = " AND (c.created_by = ? OR c.assigned_to = ? OR c.id IN (
                         SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
                     )) ";
-            return ['sql' => $sql, 'types' => 'ii', 'params' => [$userId, $userId]];
+            return ['sql' => $sql, 'types' => 'iii', 'params' => [$userId, $userId, $userId]];
         }
-        $sql = " AND c.id IN (
+        $sql = " AND (c.assigned_to = ? OR c.id IN (
                     SELECT DISTINCT cm.conversation_id FROM chat_messages cm WHERE cm.user_id = ?
-                ) ";
-        return ['sql' => $sql, 'types' => 'i', 'params' => [$userId]];
+                )) ";
+        return ['sql' => $sql, 'types' => 'ii', 'params' => [$userId, $userId]];
     }
 
     public function checkAccess(int $convId, int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true): bool
@@ -156,11 +183,19 @@ class ConversationRepository
         return $row ?: null;
     }
 
-    public function listWithDetails(int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true, int $limit = 50): array
+    public function listWithDetails(int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true, int $limit = 50, ?string $statusFilter = null): array
     {
         $iso = $this->buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
+        $statusSql = "";
+        $statusParams = [];
+        $statusTypes = "";
+        if ($statusFilter !== null) {
+            $statusSql = " AND c.status = ? ";
+            $statusTypes = "s";
+            $statusParams = [$statusFilter];
+        }
         $sql = "
-            SELECT c.id, c.contact_number, c.last_message_at, c.is_pinned,
+            SELECT c.id, c.contact_number, c.last_message_at, c.is_pinned, c.status, c.assigned_to,
                 (SELECT cm.body FROM chat_messages cm WHERE cm.conversation_id = c.id
                     ORDER BY cm.sent_at DESC LIMIT 1) AS last_message,
                 (SELECT COUNT(*) FROM chat_messages cm WHERE cm.conversation_id = c.id
@@ -168,13 +203,13 @@ class ConversationRepository
                         FROM chat_messages cm2 WHERE cm2.conversation_id = c.id AND cm2.direction = 'out'), '2000-01-01')
                 ) AS unread_count
             FROM conversations c
-            WHERE c.company_id = ?" . $iso['sql'] . "
+            WHERE c.company_id = ?" . $iso['sql'] . $statusSql . "
             ORDER BY c.is_pinned DESC, c.last_message_at DESC
             LIMIT ?
         ";
         $stmt = $this->db->prepare($sql);
-        $types = 'i' . $iso['types'] . 'i';
-        $params = array_merge([$companyId], $iso['params'], [$limit]);
+        $types = 'i' . $iso['types'] . $statusTypes . 'i';
+        $params = array_merge([$companyId], $iso['params'], $statusParams, [$limit]);
         $stmt->bind_param($types, ...$params);
         $stmt->execute();
         $result = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);

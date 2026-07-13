@@ -66,4 +66,14 @@ class ConversationService
     {
         $this->repo->deleteById($conversationId, $companyId);
     }
+
+    public function updateStatus(int $conversationId, int $companyId, string $status): void
+    {
+        $this->repo->updateStatus($conversationId, $companyId, $status);
+    }
+
+    public function updateAssignee(int $conversationId, int $companyId, ?int $assignedTo): void
+    {
+        $this->repo->updateAssignee($conversationId, $companyId, $assignedTo);
+    }
 }

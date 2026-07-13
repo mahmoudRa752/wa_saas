@@ -48,7 +48,6 @@ $companyId    = (int) $_SESSION['company_id'];
 $role         = $_SESSION['role'] ?? '';
 $userId       = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
 $isAdmin      = ($role === 'admin');
-// created_by confirmed present in live DB (schema audit 2025). No runtime ALTER needed.
 $hasCreatedBy = true;
 
 $tenantContext = TenantContext::fromSession();
@@ -60,12 +59,6 @@ $conversationNotes = [];
 
 $convRepo = new ConversationRepository($conn);
 
-/** Checks whether the current user may access a given conversation. */
-function userCanAccessConversation(ConversationRepository $convRepo, int $convId, int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true): bool
-{
-    return $convRepo->checkAccess($convId, $companyId, $isAdmin, $userId, $hasCreatedBy);
-}
-
 // ── 1. Handle POST actions ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $action = $_POST['action'];
@@ -74,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'new_chat') {
         $newNumber = trim($_POST['new_number']);
         if (!empty($newNumber)) {
-            $convService = new ConversationService(new ConversationRepository($conn));
+            $convService = new ConversationService($convRepo);
             $newId       = $convService->findOrCreate($companyId, $newNumber, $userId);
             header("Location: chat.php?conv=" . $newId);
             exit;
@@ -108,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         $noteBody = trim($_POST['conversation_note_body'] ?? '');
         $convId = (int) ($_POST['conversation_id'] ?? 0);
-        if ($convId > 0 && $noteBody !== '' && userCanAccessConversation($convRepo, $convId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if ($convId > 0 && $noteBody !== '' && $convRepo->checkAccess($convId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $conversationNoteService->create($tenantContext, $convId, $noteBody, $userId);
         }
         header("Location: chat.php?conv=" . $convId);
@@ -125,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $noteBody = trim($_POST['conversation_note_body'] ?? '');
         if ($noteId > 0 && $noteBody !== '') {
             $note = $conversationNoteService->getById($tenantContext, $noteId);
-            if ($note && userCanAccessConversation($convRepo, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            if ($note && $convRepo->checkAccess($note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
                 $conversationNoteService->update($tenantContext, $noteId, $noteBody);
             }
         }
@@ -142,7 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $noteId = (int) ($_POST['conversation_note_id'] ?? 0);
         if ($noteId > 0) {
             $note = $conversationNoteService->getById($tenantContext, $noteId);
-            if ($note && userCanAccessConversation($convRepo, $note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            if ($note && $convRepo->checkAccess($note->conversationId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
                 $conversationNoteService->delete($tenantContext, $noteId);
             }
         }
@@ -154,7 +147,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'toggle_pin') {
         $cId = (int) $_POST['conv_id'];
         $status = (int) $_POST['pin_status'];
-        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if ($convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $convService = new ConversationService($convRepo);
             $convService->updatePin($cId, $companyId, $status);
         }
@@ -166,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     if ($action === 'edit_chat') {
         $cId = (int) $_POST['conv_id'];
         $updatedNumber = trim($_POST['edit_number']);
-        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if ($convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $convService = new ConversationService($convRepo);
             $convService->updateContactNumber($cId, $companyId, $updatedNumber);
         }
@@ -177,7 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // حذف المحادثة بالكامل ورسائلها محلياً
     if ($action === 'delete_chat') {
         $cId = (int) $_POST['conv_id'];
-        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if ($convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $convService = new ConversationService($convRepo);
             $convService->delete($cId, $companyId);
         }
@@ -191,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $newBody = trim($_POST['message_body']);
         $cId = (int) $_GET['conv'];
 
-        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if ($convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
             $wamid = $chatMsgService->getWamid($msgId);
 
@@ -213,7 +206,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $msgId = (int) $_POST['message_id'];
         $cId = (int) $_GET['conv'];
 
-        if (userCanAccessConversation($convRepo, $cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+        if ($convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
             $chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
             $wamid = $chatMsgService->getWamid($msgId);
 
@@ -229,16 +222,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         header("Location: chat.php?conv=" . $cId);
         exit;
     }
-} // ✅ تم إغلاق قوس التحقق الرئيسي هنا بنجاح
 
-// ── 2. جلب المحادثات الجانبية (بدون JOIN يخفي المحادثات الجديدة/الفارغة) ──
-$conversations = $convRepo->listWithDetails($companyId, $isAdmin, $userId, $hasCreatedBy, 50);
+    // Update conversation assignee
+    if ($action === 'update_assignee') {
+        $cId = (int) $_POST['conv_id'];
+        $assignedTo = isset($_POST['assigned_to']) && $_POST['assigned_to'] !== '' ? (int) $_POST['assigned_to'] : null;
+        if ($convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $convService = new ConversationService($convRepo);
+            $convService->updateAssignee($cId, $companyId, $assignedTo);
+        }
+        header("Location: chat.php?conv=" . $cId);
+        exit;
+    }
+
+    // Update conversation status
+    if ($action === 'update_status') {
+        $cId = (int) $_POST['conv_id'];
+        $status = trim($_POST['status']);
+        if (in_array($status, ['open', 'pending', 'closed']) && $convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $convService = new ConversationService($convRepo);
+            $convService->updateStatus($cId, $companyId, $status);
+        }
+        header("Location: chat.php?conv=" . $cId);
+        exit;
+    }
+
+    // Create a new tag
+    if ($action === 'create_tag') {
+        $tagName = trim($_POST['tag_name'] ?? '');
+        $tagColor = trim($_POST['tag_color'] ?? '#6366f1');
+        if ($tagName !== '') {
+            $stmt = $conn->prepare("INSERT IGNORE INTO tags (company_id, name, color) VALUES (?, ?, ?)");
+            $stmt->bind_param("iss", $companyId, $tagName, $tagColor);
+            $stmt->execute();
+            $stmt->close();
+        }
+        header("Location: chat.php" . (isset($_GET['conv']) ? "?conv=" . (int) $_GET['conv'] : ""));
+        exit;
+    }
+
+    // Attach tag to conversation
+    if ($action === 'attach_tag') {
+        $cId = (int) $_POST['conv_id'];
+        $tagId = (int) $_POST['tag_id'];
+        if ($cId > 0 && $tagId > 0 && $convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $stmt = $conn->prepare("INSERT IGNORE INTO conversation_tags (conversation_id, tag_id) VALUES (?, ?)");
+            $stmt->bind_param("ii", $cId, $tagId);
+            $stmt->execute();
+            $stmt->close();
+        }
+        header("Location: chat.php?conv=" . $cId);
+        exit;
+    }
+
+    // Detach tag from conversation
+    if ($action === 'detach_tag') {
+        $cId = (int) $_POST['conv_id'];
+        $tagId = (int) $_POST['tag_id'];
+        if ($cId > 0 && $tagId > 0 && $convRepo->checkAccess($cId, $companyId, $isAdmin, $userId, $hasCreatedBy)) {
+            $stmt = $conn->prepare("DELETE FROM conversation_tags WHERE conversation_id = ? AND tag_id = ?");
+            $stmt->bind_param("ii", $cId, $tagId);
+            $stmt->execute();
+            $stmt->close();
+        }
+        header("Location: chat.php?conv=" . $cId);
+        exit;
+    }
+}
+
+// ── 2. Get status filtering and conversations ──
+$statusFilter = isset($_GET['status']) && in_array($_GET['status'], ['open', 'pending', 'closed']) ? $_GET['status'] : null;
+$conversations = $convRepo->listWithDetails($companyId, $isAdmin, $userId, $hasCreatedBy, 50, $statusFilter);
 
 $activeConvId = isset($_GET['conv']) ? (int) $_GET['conv'] : ($conversations[0]['id'] ?? 0);
 $activeConv = null;
 $initMessages = [];
 
-// ── 3. جلب الرسائل (نفس شرط العزل حتى لا يفتح الموظف محادثة غيره عبر الرابط) ──
+// Related items for the profile panel
+$employees = [];
+$companyTags = [];
+$activeConvTags = [];
+$stats = ['sent_count' => 0, 'rcv_count' => 0, 'first_contact' => 'N/A'];
+
 if ($activeConvId > 0) {
     $activeConv = $convRepo->getActiveConversation($activeConvId, $companyId, $isAdmin, $userId, $hasCreatedBy);
 
@@ -247,8 +312,50 @@ if ($activeConvId > 0) {
         $initMessages = $chatMsgService->listForConversation($activeConvId, 50);
 
         $conversationNotes = $conversationNoteService->listForConversation($tenantContext, $activeConvId);
+
+        // Fetch employees for assignment dropdown
+        $stmt = $conn->prepare("SELECT id, name FROM users WHERE company_id = ? ORDER BY name ASC");
+        $stmt->bind_param("i", $companyId);
+        $stmt->execute();
+        $employees = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        // Fetch all company tags
+        $stmt = $conn->prepare("SELECT * FROM tags WHERE company_id = ? ORDER BY name ASC");
+        $stmt->bind_param("i", $companyId);
+        $stmt->execute();
+        $companyTags = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        // Fetch active conversation tags
+        $stmt = $conn->prepare("
+            SELECT t.* FROM tags t 
+            JOIN conversation_tags ct ON t.id = ct.tag_id 
+            WHERE ct.conversation_id = ?
+        ");
+        $stmt->bind_param("i", $activeConvId);
+        $stmt->execute();
+        $activeConvTags = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        // Fetch statistics
+        $stmt = $conn->prepare("
+            SELECT 
+                COUNT(CASE WHEN direction = 'out' THEN 1 END) as sent_count,
+                COUNT(CASE WHEN direction = 'in' THEN 1 END) as rcv_count,
+                MIN(sent_at) as first_contact
+            FROM chat_messages 
+            WHERE conversation_id = ?
+        ");
+        $stmt->bind_param("i", $activeConvId);
+        $stmt->execute();
+        if ($res = $stmt->get_result()->fetch_assoc()) {
+            $stats['sent_count'] = (int) $res['sent_count'];
+            $stats['rcv_count'] = (int) $res['rcv_count'];
+            $stats['first_contact'] = $res['first_contact'] ? date('Y-m-d H:i', strtotime($res['first_contact'])) : 'N/A';
+        }
+        $stmt->close();
     } else {
-        // المحادثة غير موجودة أو لا يملك الموظف صلاحية الوصول إليها
         $activeConvId = 0;
     }
 }
@@ -276,7 +383,7 @@ include("../layouts/header.php");
 .conv-item.active { background: #eaeaea; }
 .conv-avatar { width: 44px; height: 44px; border-radius: 50%; background: #00a884; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 600; font-size: 14px; flex-shrink: 0; }
 .conv-info { flex: 1; min-width: 0; }
-.conv-name { font-size: 14px; font-weight: 600; color: #111b21; display: flex; align-items: center; gap: 6px; }
+.conv-name { font-size: 14px; font-weight: 600; color: #111b21; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .conv-preview { font-size: 13px; color: #667781; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 .conv-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; position: relative; }
 .conv-time { font-size: 11px; color: #667781; }
@@ -286,10 +393,12 @@ include("../layouts/header.php");
 .dropdown-menu-wa { display: none; position: absolute; top: 25px; right: 0; background: white; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 9999; min-width: 150px; }
 .dropdown-menu-wa button { background: none; border: none; width: 100%; text-align: left; padding: 10px 12px; font-size: 13px; color: #111b21; cursor: pointer; display: flex; align-items: center; gap: 8px; }
 .dropdown-menu-wa button:hover { background: #f5f6f6; }
+
 .chat-window { flex: 1; display: flex; flex-direction: column; min-width: 0; background-color: #efeae2; background-image: url('https://user-images.githubusercontent.com/15075759/28719144-86dc0f70-73b1-11e7-911d-60d70fcded21.png'); }
-.chat-header { padding: 10px 20px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; gap: 12px; background: #f0f2f5; z-index: 10; }
+.chat-header { padding: 10px 20px; border-bottom: 1px solid #e2e8f0; display: flex; align-items: center; justify-content: space-between; background: #f0f2f5; z-index: 10; }
+.chat-header-left { display: flex; align-items: center; gap: 12px; }
 .chat-header-avatar { width: 40px; height: 40px; border-radius: 50%; background: #6366f1; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; }
-.chat-header-info .name { font-size: 15px; font-weight: 600; color: #111b21; }
+.chat-header-info .name { font-size: 15px; font-weight: 600; color: #111b21; display: flex; align-items: center; gap: 8px; }
 .quick-replies-bar { padding: 8px 16px; background: #f0f2f5; border-bottom: 1px solid #e2e8f0; display: flex; gap: 8px; overflow-x: auto; }
 .quick-reply-btn { background: #fff; border: 1px solid #d1d7db; border-radius: 16px; padding: 4px 12px; font-size: 12.5px; color: #111b21; cursor: pointer; white-space: nowrap; }
 .chat-messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column-reverse; gap: 12px; }
@@ -331,14 +440,28 @@ include("../layouts/header.php");
 .saved-reply-delete { border: none; background: #fee2e2; color: #b91c1c; border-radius: 999px; width: 22px; height: 22px; cursor: pointer; font-size: 12px; }
 .saved-reply-modal-body { display: flex; flex-direction: column; gap: 10px; }
 .saved-reply-modal-body input, .saved-reply-modal-body textarea { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
-.notes-panel { padding: 10px 16px; background: #f8fafc; border-top: 1px solid #e2e8f0; }
-.notes-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: #334155; }
-.notes-new-btn { border: none; background: #0f766e; color: #fff; border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-.notes-list { display: flex; flex-direction: column; gap: 8px; }
-.note-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: #334155; }
+
+/* ── Collapsible Right Customer Profile Panel ── */
+.profile-panel { width: 300px; min-width: 300px; border-left: 1px solid #e2e8f0; background: #f8fafc; display: flex; flex-direction: column; height: 100%; transition: all 0.3s ease; }
+.profile-panel.collapsed { width: 0; min-width: 0; border-left: none; overflow: hidden; }
+.profile-header { padding: 12px 16px; font-weight: 700; font-size: 15px; border-bottom: 1px solid #e2e8f0; background: #f0f2f5; display: flex; justify-content: space-between; align-items: center; color: #111b21; }
+.profile-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 20px; }
+.profile-section { border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; }
+.profile-section:last-child { border-bottom: none; }
+.profile-section-title { font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; justify-content: space-between; align-items: center; }
+.stats-table { width: 100%; font-size: 13px; }
+.stats-table td { padding: 4px 0; color: #334155; }
+.stats-table td.val { text-align: right; font-weight: 600; color: #0f172a; }
+.tags-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.tag-badge { font-size: 11px; padding: 3px 8px; border-radius: 12px; color: #fff; display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.tag-badge form { display: inline; }
+.tag-badge button { border: none; background: transparent; color: #fff; font-size: 10px; cursor: pointer; padding: 0 0 0 4px; line-height: 1; }
+.notes-list { display: flex; flex-direction: column; gap: 8px; max-height: 250px; overflow-y: auto; }
+.note-item { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; font-size: 12.5px; color: #334155; }
 .note-item small { color: #64748b; display: block; margin-top: 4px; }
 .note-actions { display: flex; gap: 6px; margin-top: 6px; }
-.note-actions button { border: none; background: #f1f5f9; color: #334155; border-radius: 999px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+.note-actions button { border: none; background: #f1f5f9; color: #334155; border-radius: 999px; padding: 2px 6px; font-size: 11px; cursor: pointer; }
+.note-actions button:hover { background: #e2e8f0; }
 </style>
 <div class="chat-wrapper">
     <div class="conv-list">
@@ -355,6 +478,13 @@ include("../layouts/header.php");
                 <i class="bi bi-plus-lg"></i>
             </button>
         </div>
+        <!-- Filter Tabs -->
+        <div class="px-2 pb-2 d-flex gap-1" style="border-bottom: 1px solid #e2e8f0; background: #fff;">
+            <a href="chat.php" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === null ? 'fw-bold text-primary bg-white border border-primary' : ''; ?>" style="font-size:11px;">All</a>
+            <a href="chat.php?status=open" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === 'open' ? 'fw-bold text-success bg-white border border-success' : ''; ?>" style="font-size:11px;">Open</a>
+            <a href="chat.php?status=pending" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === 'pending' ? 'fw-bold text-warning bg-white border border-warning' : ''; ?>" style="font-size:11px;">Pending</a>
+            <a href="chat.php?status=closed" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === 'closed' ? 'fw-bold text-secondary bg-white border border-secondary' : ''; ?>" style="font-size:11px;">Closed</a>
+        </div>
         <div class="conv-list-body" id="convListBody">
             <?php if (empty($conversations)): ?>
                 <div style="padding:40px; text-align:center; color:#667781;">No conversations found.</div>
@@ -364,14 +494,17 @@ include("../layouts/header.php");
                     $isActive = ($conv['id'] == $activeConvId);
                     $preview = $conv['last_message'] ? mb_substr($conv['last_message'], 0, 30) . '...' : 'Media/Attachment';
                     $timeAgo = date('H:i', strtotime($conv['last_message_at']));
+                    $st = $conv['status'] ?? 'open';
+                    $badgeClass = ($st === 'open') ? 'bg-success' : (($st === 'pending') ? 'bg-warning text-dark' : 'bg-secondary');
                     ?>
                     <div class="conv-item <?php echo $isActive ? 'active' : ''; ?>"
-                         data-number="<?php echo htmlspecialchars($conv['contact_number']); ?>"
-                         onclick="if(!event.target.closest('.dropdown-zone')) window.location.href='?conv=<?php echo $conv['id']; ?>'">
+                          data-number="<?php echo htmlspecialchars($conv['contact_number']); ?>"
+                          onclick="if(!event.target.closest('.dropdown-zone')) window.location.href='?conv=<?php echo $conv['id']; ?><?php echo $statusFilter ? "&status=" . $statusFilter : ""; ?>'">
                         <div class="conv-avatar"><?php echo substr($conv['contact_number'], -2); ?></div>
                         <div class="conv-info">
                             <div class="conv-name">
                                 <?php echo htmlspecialchars($conv['contact_number']); ?>
+                                <span class="badge <?php echo $badgeClass; ?>" style="font-size:9px; padding: 2px 4px;"><?php echo htmlspecialchars(ucfirst($st)); ?></span>
                                 <?php if ($conv['is_pinned']): ?>
                                     <i class="bi bi-pin-angle-fill text-secondary fs-6" title="Pinned"></i>
                                 <?php endif; ?>
@@ -412,9 +545,18 @@ include("../layouts/header.php");
     <?php if ($activeConv): ?>
         <div class="chat-window">
             <div class="chat-header">
-                <div class="chat-header-avatar"><i class="bi bi-person-fill"></i></div>
-                <div class="chat-header-info">
-                    <div class="name"><?php echo htmlspecialchars($activeConv['contact_number']); ?></div>
+                <div class="chat-header-left">
+                    <div class="chat-header-avatar"><i class="bi bi-person-fill"></i></div>
+                    <div class="chat-header-info">
+                        <div class="name">
+                            <?php echo htmlspecialchars($activeConv['contact_number']); ?>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleProfilePanel()" title="Profile & Notes">
+                        <i class="bi bi-person-badge"></i> Profile Info
+                    </button>
                 </div>
             </div>
             <div class="quick-replies-bar">
@@ -485,33 +627,6 @@ include("../layouts/header.php");
                     <?php endif; ?>
                 </div>
             </div>
-            <div class="notes-panel">
-                <div class="notes-header">
-                    <span>Internal Notes</span>
-                    <button type="button" class="notes-new-btn" onclick="toggleModal('conversationNoteModal')">+ Add</button>
-                </div>
-                <div class="notes-list">
-                    <?php if (empty($conversationNotes)): ?>
-                        <span style="font-size:12px;color:#64748b;">No internal notes for this conversation yet.</span>
-                    <?php else: ?>
-                        <?php foreach ($conversationNotes as $note): ?>
-                            <div class="note-item">
-                                <div><?php echo nl2br(htmlspecialchars($note->body)); ?></div>
-                                <small>Added <?php echo htmlspecialchars($note->createdAt); ?></small>
-                                <div class="note-actions">
-                                    <button type="button" onclick="openNoteEditModal(<?php echo (int) $note->id; ?>, '<?php echo htmlspecialchars($note->body, ENT_QUOTES); ?>')">Edit</button>
-                                    <form method="POST" action="" onsubmit="return confirm('Delete this internal note?');" style="margin:0;display:inline;">
-                                        <input type="hidden" name="action" value="conversation_note_delete">
-                                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
-                                        <input type="hidden" name="conversation_note_id" value="<?php echo (int) $note->id; ?>">
-                                        <button type="submit">Delete</button>
-                                    </form>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                </div>
-            </div>
             <div class="chat-input-area">
                 <div class="native-emoji-picker" id="nativeEmojiPicker">
                     <div class="emoji-picker-header">Emojis & Stickers</div>
@@ -522,6 +637,142 @@ include("../layouts/header.php");
                 <input type="file" id="fileInput" onchange="handleFileSelect(this)">
                 <div class="chat-input-container"><textarea id="msgInput" placeholder="Type a message..."></textarea></div>
                 <button class="send-btn-wa" id="sendBtn"><i class="bi bi-send-fill"></i></button>
+            </div>
+        </div>
+
+        <!-- ── Collapsible Right Customer Profile Panel ── -->
+        <div class="profile-panel" id="profilePanel">
+            <div class="profile-header">
+                <span>Customer Profile</span>
+                <button type="button" class="btn-close text-reset" style="font-size:12px;" onclick="toggleProfilePanel()"></button>
+            </div>
+            <div class="profile-body">
+                <!-- Status & Assignee Settings -->
+                <div class="profile-section">
+                    <div class="profile-section-title">Assignment & Status</div>
+                    
+                    <form method="POST" class="mb-3">
+                        <input type="hidden" name="action" value="update_status">
+                        <input type="hidden" name="conv_id" value="<?php echo $activeConvId; ?>">
+                        <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Status</label>
+                        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <option value="open" <?php echo $activeConv['status'] === 'open' ? 'selected' : ''; ?>>Open</option>
+                            <option value="pending" <?php echo $activeConv['status'] === 'pending' ? 'selected' : ''; ?>>Pending</option>
+                            <option value="closed" <?php echo $activeConv['status'] === 'closed' ? 'selected' : ''; ?>>Closed</option>
+                        </select>
+                    </form>
+
+                    <form method="POST">
+                        <input type="hidden" name="action" value="update_assignee">
+                        <input type="hidden" name="conv_id" value="<?php echo $activeConvId; ?>">
+                        <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Assignee</label>
+                        <select name="assigned_to" class="form-select form-select-sm" onchange="this.form.submit()">
+                            <option value="">Unassigned</option>
+                            <?php foreach ($employees as $emp): ?>
+                                <option value="<?php echo $emp['id']; ?>" <?php echo $activeConv['assigned_to'] == $emp['id'] ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($emp['name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </form>
+                </div>
+
+                <!-- Tags Section -->
+                <div class="profile-section">
+                    <div class="profile-section-title">Tags</div>
+                    <div class="tags-list">
+                        <?php if (empty($activeConvTags)): ?>
+                            <span class="text-muted" style="font-size:12px;">No tags applied.</span>
+                        <?php else: ?>
+                            <?php foreach ($activeConvTags as $tag): ?>
+                                <span class="tag-badge" style="background-color: <?php echo htmlspecialchars($tag['color']); ?>">
+                                    <?php echo htmlspecialchars($tag['name']); ?>
+                                    <form method="POST" style="margin:0;">
+                                        <input type="hidden" name="action" value="detach_tag">
+                                        <input type="hidden" name="conv_id" value="<?php echo $activeConvId; ?>">
+                                        <input type="hidden" name="tag_id" value="<?php echo $tag['id']; ?>">
+                                        <button type="submit" title="Remove Tag">&times;</button>
+                                    </form>
+                                </span>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Attach existing tag -->
+                    <?php if (!empty($companyTags)): ?>
+                        <form method="POST" class="mb-2">
+                            <input type="hidden" name="action" value="attach_tag">
+                            <input type="hidden" name="conv_id" value="<?php echo $activeConvId; ?>">
+                            <select name="tag_id" class="form-select form-select-sm" onchange="this.form.submit()">
+                                <option value="">+ Add Tag...</option>
+                                <?php foreach ($companyTags as $tag): ?>
+                                    <!-- Skip tags already attached -->
+                                    <?php
+                                    $alreadyAttached = false;
+                                    foreach ($activeConvTags as $act) {
+                                        if ($act['id'] == $tag['id']) $alreadyAttached = true;
+                                    }
+                                    if ($alreadyAttached) continue;
+                                    ?>
+                                    <option value="<?php echo $tag['id']; ?>"><?php echo htmlspecialchars($tag['name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </form>
+                    <?php endif; ?>
+
+                    <!-- Create new tag -->
+                    <button type="button" class="btn btn-sm btn-link text-decoration-none p-0" style="font-size:12px;" onclick="toggleModal('createTagModal')">
+                        + Create New Custom Tag
+                    </button>
+                </div>
+
+                <!-- Statistics Section -->
+                <div class="profile-section">
+                    <div class="profile-section-title">Statistics</div>
+                    <table class="stats-table">
+                        <tr>
+                            <td>Messages Out</td>
+                            <td class="val"><?php echo number_format($stats['sent_count']); ?></td>
+                        </tr>
+                        <tr>
+                            <td>Messages In</td>
+                            <td class="val"><?php echo number_format($stats['rcv_count']); ?></td>
+                        </tr>
+                        <tr>
+                            <td>First Contact</td>
+                            <td class="val" style="font-size:11.5px;"><?php echo htmlspecialchars($stats['first_contact']); ?></td>
+                        </tr>
+                    </table>
+                </div>
+
+                <!-- Relocated Internal Notes Section -->
+                <div class="profile-section">
+                    <div class="profile-section-title">
+                        <span>Internal Notes</span>
+                        <button type="button" class="notes-new-btn" onclick="toggleModal('conversationNoteModal')">+ Add</button>
+                    </div>
+                    <div class="notes-list">
+                        <?php if (empty($conversationNotes)): ?>
+                            <span style="font-size:12px;color:#64748b;">No internal notes yet.</span>
+                        <?php else: ?>
+                            <?php foreach ($conversationNotes as $note): ?>
+                                <div class="note-item">
+                                    <div><?php echo nl2br(htmlspecialchars($note->body)); ?></div>
+                                    <small>Added <?php echo htmlspecialchars($note->createdAt); ?></small>
+                                    <div class="note-actions">
+                                        <button type="button" onclick="openNoteEditModal(<?php echo (int) $note->id; ?>, '<?php echo htmlspecialchars($note->body, ENT_QUOTES); ?>')">Edit</button>
+                                        <form method="POST" action="" onsubmit="return confirm('Delete this internal note?');" style="margin:0;display:inline;">
+                                            <input type="hidden" name="action" value="conversation_note_delete">
+                                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken); ?>">
+                                            <input type="hidden" name="conversation_note_id" value="<?php echo (int) $note->id; ?>">
+                                            <button type="submit">Delete</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php endif; ?>
+                    </div>
+                </div>
             </div>
         </div>
     <?php else: ?>
@@ -632,8 +883,30 @@ include("../layouts/header.php");
     </div>
 </div>
 
+<div id="createTagModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:24px; border-radius:12px; width:340px;">
+        <h5 style="margin-top:0; margin-bottom:14px; font-weight:600;">Create Custom Tag</h5>
+        <form method="POST" action="">
+            <input type="hidden" name="action" value="create_tag">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <div>
+                    <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Tag Name</label>
+                    <input type="text" name="tag_name" placeholder="e.g. VIP" required class="form-control form-control-sm">
+                </div>
+                <div>
+                    <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Tag Color</label>
+                    <input type="color" name="tag_color" value="#6366f1" class="form-control form-control-color w-100" style="height:38px;">
+                </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                <button type="button" onclick="toggleModal('createTagModal')" style="padding:6px 12px; border-radius:6px; background:#eee; border:none; font-size:13px;">Cancel</button>
+                <button type="submit" style="padding:6px 12px; border-radius:6px; background:#6366f1; color:#fff; border:none; font-size:13px;">Create Tag</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
-// ── سكربت عام: يعمل دائماً بغض النظر عن وجود محادثة نشطة ──
 function toggleDropdownMenu(event, id) {
     if (event) { event.stopPropagation(); event.preventDefault(); }
     const menus = document.querySelectorAll('.dropdown-menu-wa');
@@ -694,15 +967,30 @@ function insertSavedReply(button) {
         input.dispatchEvent(new Event('input'));
     }
 }
+
+// Collapsible right profile panel controls
+function toggleProfilePanel() {
+    const panel = document.getElementById('profilePanel');
+    if (panel) {
+        panel.classList.toggle('collapsed');
+        localStorage.setItem('chatProfileCollapsed', panel.classList.contains('collapsed') ? '1' : '0');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const collapsed = localStorage.getItem('chatProfileCollapsed');
+    const panel = document.getElementById('profilePanel');
+    if (panel) {
+        if (collapsed === '1') {
+            panel.classList.add('collapsed');
+        } else {
+            panel.classList.remove('collapsed');
+        }
+    }
+});
 </script>
 
 <script>
-/*
- * ── سكربت الرسائل/المحادثة النشطة ──
- * هام: هذا السكربت يُطبع دائماً (غير موضوع داخل شرط PHP واحد) حتى تبقى
- * CONV_ID و lastMsgId معرّفتين بقيمة افتراضية (0) في كل الحالات، فلا
- * تتوقف أزرار الإرسال/الإيموجي حتى عند عدم وجود محادثة نشطة.
- */
 const CONV_ID = <?php echo (int) $activeConvId; ?>;
 const API_BASE = '/wa_saas/api';
 let lastMsgId = <?php echo (int) $lastMsgId; ?>;
@@ -791,10 +1079,10 @@ function sendQuickReply(text) { sendData('text', null, text); }
 
 async function sendData(type, file, textBody) {
     if (!CONV_ID) {
-            console.warn('لا توجد محادثة نشطة لإرسال رسالة إليها.');
-            alert('لا يمكن الإرسال: لا توجد محادثة مفتوحة حالياً، أو لا تملك صلاحية الوصول لهذه المحادثة. اختر محادثة من القائمة الجانبية أولاً.');
-            return;
-        }
+        console.warn('لا توجد محادثة نشطة لإرسال رسالة إليها.');
+        alert('لا يمكن الإرسال: لا توجد محادثة مفتوحة حالياً، أو لا تملك صلاحية الوصول لهذه المحادثة. اختر محادثة من القائمة الجانبية أولاً.');
+        return;
+    }
     if (sendBtn) sendBtn.disabled = true;
     const formData = new FormData();
     formData.append('conversation_id', CONV_ID);
@@ -853,7 +1141,7 @@ if (sendBtn) {
     sendBtn.addEventListener('click', sendMessage);
 }
 
-// الاستطلاع (polling) يبدأ فقط عند وجود محادثة نشطة فعلياً
+// Polling starts if active conversation exists
 if (CONV_ID > 0) {
     polling = setInterval(pollMessages, 3000);
 }
