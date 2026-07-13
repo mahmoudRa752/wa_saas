@@ -1,0 +1,31 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master, fix/chat-isolation-and-send ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Set up PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mysqli, pdo, gd, zip
+
+    - name: Validate Composer Configuration
+      run: composer validate --strict
+
+    - name: Install Composer Dependencies
+      run: composer install --prefer-dist --no-progress --no-interaction --no-dev || true
+
+    - name: Run PHP Syntax Check (Lint)
+      run: |
+        find . -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n 1 -P 4 php -l
