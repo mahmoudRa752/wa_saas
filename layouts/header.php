@@ -53,6 +53,7 @@ $titles = [
         'chat.php'             => 'Live Chat',
         'internal_chat.php'    => 'Internal Chat',
         'employees.php'        => 'Employees',
+        'employee_performance.php' => 'Employee Performance',
         'whatsapp_numbers.php' => 'WhatsApp Numbers',
         'upgrade.php'          => 'Upgrade Plan',
         'company_profile.php'  => 'Company Profile',
@@ -275,6 +276,9 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
                 <div class="nav-section-title">Management</div>
                 <a href="/wa_saas/dashboard/employees.php" class="nav-link <?php echo $currentPage === 'employees.php' ? 'active' : ''; ?>">
                     <span class="nav-icon"><i class="bi bi-people-fill"></i></span> Employees
+                </a>
+                <a href="/wa_saas/dashboard/employee_performance.php" class="nav-link <?php echo $currentPage === 'employee_performance.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-bar-chart-line-fill"></i></span> Performance
                 </a>
                 <a href="/wa_saas/dashboard/whatsapp_numbers.php" class="nav-link <?php echo $currentPage === 'whatsapp_numbers.php' ? 'active' : ''; ?>">
                     <span class="nav-icon"><i class="bi bi-phone-fill"></i></span> WA Numbers
