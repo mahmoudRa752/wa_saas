@@ -640,8 +640,14 @@ include("../layouts/header.php");
                         </div>
                     </div>
                 </div>
-                <div>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleProfilePanel()" title="Profile & Notes">
+                <div class="d-flex gap-2">
+                    <a href="/wa_saas/api/export_chat_excel.php?conv_id=<?php echo $activeConvId; ?>" class="btn btn-sm btn-outline-success" style="font-size:12px;" title="Export to Excel">
+                        <i class="bi bi-file-earmark-excel"></i> Excel
+                    </a>
+                    <a href="/wa_saas/dashboard/export_chat_print.php?conv_id=<?php echo $activeConvId; ?>" target="_blank" class="btn btn-sm btn-outline-danger" style="font-size:12px;" title="Export to PDF/Print">
+                        <i class="bi bi-file-earmark-pdf"></i> PDF
+                    </a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" style="font-size:12px;" onclick="toggleProfilePanel()" title="Profile & Notes">
                         <i class="bi bi-person-badge"></i> Profile Info
                     </button>
                 </div>
