@@ -7,6 +7,39 @@ use Core\Company\CompanyRepository;
 
 $companyLogo = null;
 if (isset($_SESSION['company_id'])) {
+    if ($_SESSION['role'] === 'admin' && !isset($_SESSION['user_id'])) {
+        $stmt = $conn->prepare("SELECT id, name FROM users WHERE company_id = ? AND role = 'admin' LIMIT 1");
+        $cid = (int)$_SESSION['company_id'];
+        $stmt->bind_param("i", $cid);
+        $stmt->execute();
+        $adminUser = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$adminUser) {
+            $stmt = $conn->prepare("SELECT email, password, name FROM companies WHERE id = ? LIMIT 1");
+            $stmt->bind_param("i", $cid);
+            $stmt->execute();
+            $comp = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            if ($comp) {
+                $adminName = $comp['name'] . " (Admin)";
+                $adminEmail = $comp['email'];
+                $adminPass = $comp['password'];
+                $roleAdmin = 'admin';
+                $stmt = $conn->prepare("INSERT INTO users (company_id, name, email, password, role) VALUES (?, ?, ?, ?, ?)");
+                $stmt->bind_param("issss", $cid, $adminName, $adminEmail, $adminPass, $roleAdmin);
+                $stmt->execute();
+                $_SESSION['user_id'] = $conn->insert_id;
+                $_SESSION['user_name'] = $adminName;
+                $stmt->close();
+            }
+        } else {
+            $_SESSION['user_id'] = $adminUser['id'];
+            $_SESSION['user_name'] = $adminUser['name'];
+        }
+    }
+
     $companyRepo = new CompanyRepository($conn);
     $row = $companyRepo->getById((int)$_SESSION['company_id']);
     $companyLogo = $row['logo'] ?? null;
@@ -15,6 +48,8 @@ $currentPage = basename($_SERVER['PHP_SELF']);
 $titles = [
         'index.php'            => 'Dashboard',
         'send.php'             => 'Send Message',
+        'chat.php'             => 'Live Chat',
+        'internal_chat.php'    => 'Internal Chat',
         'employees.php'        => 'Employees',
         'whatsapp_numbers.php' => 'WhatsApp Numbers',
         'upgrade.php'          => 'Upgrade Plan',
@@ -223,6 +258,9 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
             </a>
             <a href="/wa_saas/dashboard/chat.php" class="nav-link <?php echo $currentPage === 'chat.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-chat-dots-fill"></i></span> Live Chat
+            </a>
+            <a href="/wa_saas/dashboard/internal_chat.php" class="nav-link <?php echo $currentPage === 'internal_chat.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-chat-left-text-fill"></i></span> Internal Chat
             </a>
 
             <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
