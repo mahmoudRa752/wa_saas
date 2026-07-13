@@ -183,7 +183,7 @@ class ConversationRepository
         return $row ?: null;
     }
 
-    public function listWithDetails(int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true, int $limit = 50, ?string $statusFilter = null): array
+    public function listWithDetails(int $companyId, bool $isAdmin, ?int $userId, bool $hasCreatedBy = true, int $limit = 50, ?string $statusFilter = null, ?array $segmentCriteria = null): array
     {
         $iso = $this->buildIsolationClause($isAdmin, (int) $userId, $hasCreatedBy);
         $statusSql = "";
@@ -194,6 +194,24 @@ class ConversationRepository
             $statusTypes = "s";
             $statusParams = [$statusFilter];
         }
+
+        $segmentSql = "";
+        if ($segmentCriteria !== null) {
+            if (!empty($segmentCriteria['status'])) {
+                $segmentSql .= " AND c.status = '" . $this->db->real_escape_string($segmentCriteria['status']) . "' ";
+            }
+            if (isset($segmentCriteria['assigned_to'])) {
+                if ($segmentCriteria['assigned_to'] === 'unassigned' || $segmentCriteria['assigned_to'] === '') {
+                    $segmentSql .= " AND c.assigned_to IS NULL ";
+                } elseif ($segmentCriteria['assigned_to'] > 0) {
+                    $segmentSql .= " AND c.assigned_to = " . (int)$segmentCriteria['assigned_to'] . " ";
+                }
+            }
+            if (!empty($segmentCriteria['tag_id'])) {
+                $segmentSql .= " AND c.id IN (SELECT conversation_id FROM conversation_tags WHERE tag_id = " . (int)$segmentCriteria['tag_id'] . ") ";
+            }
+        }
+
         $sql = "
             SELECT c.id, c.contact_number, c.last_message_at, c.is_pinned, c.status, c.assigned_to,
                 (SELECT cm.body FROM chat_messages cm WHERE cm.conversation_id = c.id
@@ -203,7 +221,7 @@ class ConversationRepository
                         FROM chat_messages cm2 WHERE cm2.conversation_id = c.id AND cm2.direction = 'out'), '2000-01-01')
                 ) AS unread_count
             FROM conversations c
-            WHERE c.company_id = ?" . $iso['sql'] . $statusSql . "
+            WHERE c.company_id = ?" . $iso['sql'] . $statusSql . $segmentSql . "
             ORDER BY c.is_pinned DESC, c.last_message_at DESC
             LIMIT ?
         ";

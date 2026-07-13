@@ -288,19 +288,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         header("Location: chat.php?conv=" . $cId);
         exit;
     }
+
+    if ($action === 'create_segment') {
+        $segmentName = trim($_POST['segment_name'] ?? '');
+        $statusVal = trim($_POST['status'] ?? '');
+        $assigneeVal = trim($_POST['assigned_to'] ?? '');
+        $tagVal = isset($_POST['tag_id']) && $_POST['tag_id'] !== '' ? (int)$_POST['tag_id'] : null;
+        
+        $criteria = [];
+        if ($statusVal !== '') $criteria['status'] = $statusVal;
+        if ($assigneeVal !== '') $criteria['assigned_to'] = $assigneeVal;
+        if ($tagVal > 0) $criteria['tag_id'] = $tagVal;
+        
+        $criteriaJson = json_encode($criteria);
+        
+        if ($segmentName !== '') {
+            $stmt = $conn->prepare("INSERT INTO segments (company_id, name, filter_criteria) VALUES (?, ?, ?)");
+            $stmt->bind_param("iss", $companyId, $segmentName, $criteriaJson);
+            $stmt->execute();
+            $stmt->close();
+        }
+        header("Location: chat.php");
+        exit;
+    }
+
+    if ($action === 'delete_segment') {
+        $segmentId = (int)$_POST['segment_id'];
+        if ($segmentId > 0) {
+            $stmt = $conn->prepare("DELETE FROM segments WHERE id = ? AND company_id = ?");
+            $stmt->bind_param("ii", $segmentId, $companyId);
+            $stmt->execute();
+            $stmt->close();
+        }
+        header("Location: chat.php");
+        exit;
+    }
 }
 
-// ── 2. Get status filtering and conversations ──
+// ── 2. Get status filtering, segments and conversations ──
 $statusFilter = isset($_GET['status']) && in_array($_GET['status'], ['open', 'pending', 'closed']) ? $_GET['status'] : null;
-$conversations = $convRepo->listWithDetails($companyId, $isAdmin, $userId, $hasCreatedBy, 50, $statusFilter);
+
+// Resolve segment criteria
+$segmentCriteria = null;
+$activeSegmentId = isset($_GET['segment']) ? (int)$_GET['segment'] : 0;
+if ($activeSegmentId > 0) {
+    $stmt = $conn->prepare("SELECT filter_criteria FROM segments WHERE id = ? AND company_id = ? LIMIT 1");
+    $stmt->bind_param("ii", $activeSegmentId, $companyId);
+    $stmt->execute();
+    if ($segRow = $stmt->get_result()->fetch_assoc()) {
+        $segmentCriteria = json_decode($segRow['filter_criteria'], true);
+    }
+    $stmt->close();
+}
+
+$conversations = $convRepo->listWithDetails($companyId, $isAdmin, $userId, $hasCreatedBy, 50, $statusFilter, $segmentCriteria);
 
 $activeConvId = isset($_GET['conv']) ? (int) $_GET['conv'] : ($conversations[0]['id'] ?? 0);
 $activeConv = null;
 $initMessages = [];
 
-// Related items for the profile panel
+// Fetch segments list
+$segmentsList = [];
+$stmt = $conn->prepare("SELECT * FROM segments WHERE company_id = ? ORDER BY name ASC");
+$stmt->bind_param("i", $companyId);
+$stmt->execute();
+$segmentsList = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
+// Fetch employees and tags for assignment/segment creation modals (always loaded)
 $employees = [];
+$stmt = $conn->prepare("SELECT id, name FROM users WHERE company_id = ? ORDER BY name ASC");
+$stmt->bind_param("i", $companyId);
+$stmt->execute();
+$employees = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
 $companyTags = [];
+$stmt = $conn->prepare("SELECT * FROM tags WHERE company_id = ? ORDER BY name ASC");
+$stmt->bind_param("i", $companyId);
+$stmt->execute();
+$companyTags = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
+
 $activeConvTags = [];
 $stats = ['sent_count' => 0, 'rcv_count' => 0, 'first_contact' => 'N/A'];
 
@@ -312,20 +381,6 @@ if ($activeConvId > 0) {
         $initMessages = $chatMsgService->listForConversation($activeConvId, 50);
 
         $conversationNotes = $conversationNoteService->listForConversation($tenantContext, $activeConvId);
-
-        // Fetch employees for assignment dropdown
-        $stmt = $conn->prepare("SELECT id, name FROM users WHERE company_id = ? ORDER BY name ASC");
-        $stmt->bind_param("i", $companyId);
-        $stmt->execute();
-        $employees = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $stmt->close();
-
-        // Fetch all company tags
-        $stmt = $conn->prepare("SELECT * FROM tags WHERE company_id = ? ORDER BY name ASC");
-        $stmt->bind_param("i", $companyId);
-        $stmt->execute();
-        $companyTags = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-        $stmt->close();
 
         // Fetch active conversation tags
         $stmt = $conn->prepare("
@@ -480,10 +535,33 @@ include("../layouts/header.php");
         </div>
         <!-- Filter Tabs -->
         <div class="px-2 pb-2 d-flex gap-1" style="border-bottom: 1px solid #e2e8f0; background: #fff;">
-            <a href="chat.php" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === null ? 'fw-bold text-primary bg-white border border-primary' : ''; ?>" style="font-size:11px;">All</a>
+            <a href="chat.php" class="btn btn-sm btn-light flex-fill <?php echo ($statusFilter === null && $activeSegmentId === 0) ? 'fw-bold text-primary bg-white border border-primary' : ''; ?>" style="font-size:11px;">All</a>
             <a href="chat.php?status=open" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === 'open' ? 'fw-bold text-success bg-white border border-success' : ''; ?>" style="font-size:11px;">Open</a>
             <a href="chat.php?status=pending" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === 'pending' ? 'fw-bold text-warning bg-white border border-warning' : ''; ?>" style="font-size:11px;">Pending</a>
             <a href="chat.php?status=closed" class="btn btn-sm btn-light flex-fill <?php echo $statusFilter === 'closed' ? 'fw-bold text-secondary bg-white border border-secondary' : ''; ?>" style="font-size:11px;">Closed</a>
+        </div>
+        <!-- Segments List -->
+        <?php if (!empty($segmentsList)): ?>
+            <div class="px-2 py-1 bg-light border-bottom" style="font-size:11px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                <span class="text-secondary fw-bold me-1">Segments:</span>
+                <?php foreach ($segmentsList as $seg): ?>
+                    <?php
+                    $isSegActive = ($activeSegmentId === (int)$seg['id']);
+                    ?>
+                    <span class="badge <?php echo $isSegActive ? 'bg-primary' : 'bg-secondary'; ?> d-inline-flex align-items-center gap-1" style="cursor:pointer; font-size:10px; padding: 3px 6px;" onclick="window.location.href='chat.php?segment=<?php echo $seg['id']; ?>'">
+                        <?php echo htmlspecialchars($seg['name']); ?>
+                        <form method="POST" action="" style="display:inline; margin:0;" onsubmit="event.stopPropagation(); return confirm('Delete this segment?');">
+                            <input type="hidden" name="action" value="delete_segment">
+                            <input type="hidden" name="segment_id" value="<?php echo $seg['id']; ?>">
+                            <button type="submit" style="border:none; background:transparent; color:#fff; font-size:10px; padding:0; cursor:pointer; line-height:1;" onclick="event.stopPropagation();">&times;</button>
+                        </form>
+                    </span>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+        <div class="px-2 py-1 d-flex justify-content-between align-items-center bg-light border-bottom" style="font-size:11px;">
+            <span class="text-secondary fw-semibold">Smart Filters</span>
+            <button type="button" class="btn btn-sm btn-link text-decoration-none p-0 fw-bold" style="font-size:11px;" onclick="toggleModal('createSegmentModal')">+ New Segment</button>
         </div>
         <div class="conv-list-body" id="convListBody">
             <?php if (empty($conversations)): ?>
@@ -904,6 +982,53 @@ include("../layouts/header.php");
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
                 <button type="button" onclick="toggleModal('createTagModal')" style="padding:6px 12px; border-radius:6px; background:#eee; border:none; font-size:13px;">Cancel</button>
                 <button type="submit" style="padding:6px 12px; border-radius:6px; background:#6366f1; color:#fff; border:none; font-size:13px;">Create Tag</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="createSegmentModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.4); z-index:9999; align-items:center; justify-content:center;">
+    <div style="background:#fff; padding:24px; border-radius:12px; width:360px;">
+        <h5 style="margin-top:0; margin-bottom:14px; font-weight:600;">Create Smart Filter Segment</h5>
+        <form method="POST" action="">
+            <input type="hidden" name="action" value="create_segment">
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <div>
+                    <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Segment Name</label>
+                    <input type="text" name="segment_name" placeholder="e.g. Unassigned VIPs" required class="form-control form-control-sm">
+                </div>
+                <div>
+                    <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Filter by Status</label>
+                    <select name="status" class="form-select form-select-sm">
+                        <option value="">Any Status</option>
+                        <option value="open">Open</option>
+                        <option value="pending">Pending</option>
+                        <option value="closed">Closed</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Filter by Assignee</label>
+                    <select name="assigned_to" class="form-select form-select-sm">
+                        <option value="">Any Assignee</option>
+                        <option value="unassigned">Unassigned</option>
+                        <?php foreach ($employees as $emp): ?>
+                            <option value="<?php echo $emp['id']; ?>"><?php echo htmlspecialchars($emp['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label text-secondary mb-1" style="font-size:11px;font-weight:600;">Filter by Tag</label>
+                    <select name="tag_id" class="form-select form-select-sm">
+                        <option value="">Any Tag</option>
+                        <?php foreach ($companyTags as $tag): ?>
+                            <option value="<?php echo $tag['id']; ?>"><?php echo htmlspecialchars($tag['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+                <button type="button" onclick="toggleModal('createSegmentModal')" style="padding:6px 12px; border-radius:6px; background:#eee; border:none; font-size:13px;">Cancel</button>
+                <button type="submit" style="padding:6px 12px; border-radius:6px; background:#2563eb; color:#fff; border:none; font-size:13px;">Create Segment</button>
             </div>
         </form>
     </div>
