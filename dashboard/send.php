@@ -37,10 +37,17 @@ if ($role == 'admin') {
     $employeesList = $companyRepo->getEmployees($company_id);
 }
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 /* ===============================
    ✅ تنفيذ الإرسال
 ================================= */
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'send_messages')) {
+        die("Invalid CSRF Token.");
+    }
 
     if ($used >= $limit) {
         $error = "❌ Monthly message limit reached.";
@@ -148,6 +155,7 @@ include("../layouts/header.php");
         <?php endif; ?>
 
         <form method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('send_messages'); ?>">
 
             <?php if($role == 'admin'): ?>
 
