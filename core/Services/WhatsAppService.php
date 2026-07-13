@@ -31,6 +31,11 @@ class WhatsAppService
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        if ($httpCode < 200 || $httpCode >= 300) {
+            require_once(__DIR__ . '/LoggerService.php');
+            LoggerService::logFailedWhatsApp($phoneNumberId, $payload['to'] ?? 'unknown', $httpCode, $response ?? '', $payload);
+        }
+
         return [
             'httpCode' => $httpCode,
             'response' => $response,
