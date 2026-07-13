@@ -84,6 +84,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
                 $convService->touch($convId);
+
+                // ── Automation Rules Trigger ──
+                $rulesStmt = $conn->prepare("SELECT * FROM automation_rules WHERE company_id = ? AND is_active = 1");
+                $rulesStmt->bind_param("i", $companyId);
+                $rulesStmt->execute();
+                $rules = $rulesStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $rulesStmt->close();
+
+                $matchedRule = null;
+                foreach ($rules as $rule) {
+                    if ($rule['trigger_type'] === 'always') {
+                        $matchedRule = $rule;
+                        break;
+                    } elseif ($rule['trigger_type'] === 'keyword') {
+                        $kw = trim($rule['keyword']);
+                        if ($kw !== '' && mb_stripos($msgBody, $kw) !== false) {
+                            $matchedRule = $rule;
+                            break;
+                        }
+                    }
+                }
+
+                if ($matchedRule !== null) {
+                    $replyText = $matchedRule['reply_text'];
+                    $accessToken = "EAAZBGtwMbSu0BR2aV2JmjOSNmHHBQAHrYyCcjDoSZCktJ5seX4XXGy8ci42Gb46oz2ZCZAWwOZBCF35kGXH9euUYgSeiZBJL5qeXtk1VXcPW9HM3idG1pZBh8R3LuAxOUKkjHA0cDd7j3gA6j57ym9EjPCfoSFRmtukVfP4nktiHnsmZCUCSlmGvWn6A7UYtklN0Brsk2LdKavex72zsvvzcRxSFaR1ZArhzO60furZCFxo7jS2hfTuVGl1aypLrqCAihmvNVYPVFcegtjDHZB91xApTZCn3";
+                    
+                    $whatsAppService = new WhatsAppService();
+                    $sendRes = $whatsAppService->sendText($phoneId, $fromNumber, $replyText, $accessToken);
+                    
+                    $outWamid = null;
+                    if ($sendRes['httpCode'] >= 200 && $sendRes['httpCode'] < 300) {
+                        $resObj = json_decode($sendRes['response'], true);
+                        $outWamid = $resObj['messages'][0]['id'] ?? null;
+                    }
+                    
+                    $chatMsgService->insertMessage(
+                        $convId,
+                        'out',
+                        $replyText,
+                        null, // Automated reply (no human sender)
+                        $outWamid,
+                        'text',
+                        null
+                    );
+                    
+                    $convService->touch($convId);
+                }
             }
         }
     }
