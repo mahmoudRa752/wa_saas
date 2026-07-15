@@ -31,7 +31,22 @@ if (!isset($_SESSION['company_id'])) {
 $ctx = TenantContext::fromSession();
 $companyId = $ctx->companyId;
 $role = $_SESSION['role'];
-$userId = (int)$_SESSION['user_id'];
+
+$userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+if ($userId === 0 && isset($_SESSION['company_id'])) {
+    $stmt = $conn->prepare("SELECT id FROM users WHERE company_id = ? AND role = 'admin' LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $_SESSION['company_id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if ($row) {
+            $userId = (int)$row['id'];
+            $_SESSION['user_id'] = $userId;
+        }
+        $stmt->close();
+    }
+}
+
 $isAdmin = ($role === 'admin');
 
 $customerRepo = new CustomerRepository($conn);

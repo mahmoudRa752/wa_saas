@@ -8,7 +8,21 @@ if (!isset($_SESSION['company_id'])) {
 }
 
 $companyId = (int) $_SESSION['company_id'];
-$myUserId  = (int) $_SESSION['user_id'];
+
+$myUserId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+if ($myUserId === 0 && isset($_SESSION['company_id'])) {
+    $stmt = $conn->prepare("SELECT id FROM users WHERE company_id = ? AND role = 'admin' LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $_SESSION['company_id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if ($row) {
+            $myUserId = (int)$row['id'];
+            $_SESSION['user_id'] = $myUserId;
+        }
+        $stmt->close();
+    }
+}
 
 // Get list of colleagues in the company
 $stmt = $conn->prepare("

@@ -23,6 +23,22 @@ if (!isset($_SESSION['company_id'])) {
 
 $company_id = $_SESSION['company_id'];
 $role = $_SESSION['role'];
+
+$userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+if ($userId === 0 && isset($_SESSION['company_id'])) {
+    $stmt = $conn->prepare("SELECT id FROM users WHERE company_id = ? AND role = 'admin' LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $_SESSION['company_id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if ($row) {
+            $userId = (int)$row['id'];
+            $_SESSION['user_id'] = $userId;
+        }
+        $stmt->close();
+    }
+}
+
 $whatsAppService = new WhatsAppService();
 $usageService = new UsageService($conn);
 $usage = $usageService->getMonthlyLimitAndUsage($company_id);
@@ -173,7 +189,7 @@ include("../layouts/header.php");
 
             <?php else: ?>
 
-                <input type="hidden" name="user_id" value="<?php echo $_SESSION['user_id']; ?>">
+                <input type="hidden" name="user_id" value="<?php echo $userId; ?>">
 
                 <div class="mb-3">
                     <label>Sending From</label>
