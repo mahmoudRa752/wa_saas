@@ -57,7 +57,7 @@ if (!$phoneNumberId) {
     exit;
 }
 
-$accessToken = WHATSAPP_ACCESS_TOKEN;
+$accessToken = getenv('WHATSAPP_TOKEN') ?: (defined('WHATSAPP_TOKEN') ? WHATSAPP_TOKEN : WHATSAPP_ACCESS_TOKEN);
 
 $convRepo = new ConversationRepository($conn);
 $conv = $convRepo->findById($conversationId, $companyId);

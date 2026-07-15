@@ -61,6 +61,7 @@ $titles = [
         'broadcasts.php'       => 'Broadcast Campaigns',
         'automations.php'      => 'Auto-Replies & Automation',
         'chat.php'             => 'Live Chat',
+        'customers.php'        => 'Customer Manager',
         'search.php'           => 'Advanced Search',
         'internal_chat.php'    => 'Internal Chat',
         'employees.php'        => 'Employees',
@@ -278,6 +279,9 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
             </a>
             <a href="/wa_saas/dashboard/chat.php" class="nav-link <?php echo $currentPage === 'chat.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-chat-dots-fill"></i></span> Live Chat
+            </a>
+            <a href="/wa_saas/dashboard/customers.php" class="nav-link <?php echo $currentPage === 'customers.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-person-lines-fill"></i></span> Customer Manager
             </a>
             <a href="/wa_saas/dashboard/search.php" class="nav-link <?php echo $currentPage === 'search.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-search"></i></span> Advanced Search

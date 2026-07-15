@@ -50,6 +50,9 @@ foreach ($result as $campaign) {
     $messageText = $campaign['message_text'];
     $recipientsText = $campaign['recipients'];
     
+    $templateName = $campaign['template_name'] ?? null;
+    $templateLanguage = $campaign['template_language'] ?? 'en_US';
+    
     // Update campaign status to sending
     $conn->query("UPDATE broadcast_campaigns SET status = 'sending' WHERE id = $campaignId");
     
@@ -74,14 +77,16 @@ foreach ($result as $campaign) {
         $recipient = preg_replace('/[^0-9]/', '', $recipient);
         if (empty($recipient)) continue;
         
-        $res = $whatsAppService->sendText($phoneNumberId, $recipient, $messageText, $accessToken);
-        if ($res['httpCode'] != 200) {
-            // Send default template as fallback
-            $whatsAppService->sendTemplate($phoneNumberId, $recipient, $accessToken);
+        if (!empty($templateName)) {
+            $res = $whatsAppService->sendTemplate($phoneNumberId, $recipient, $accessToken, $templateName, $templateLanguage);
+            $logMessageText = "[Template: $templateName ($templateLanguage)] " . $messageText;
+        } else {
+            $res = $whatsAppService->sendText($phoneNumberId, $recipient, $messageText, $accessToken);
+            $logMessageText = $messageText;
         }
         
         // Log message
-        $msgLogRepo->logSentMessage($userId, $recipient, $messageText);
+        $msgLogRepo->logSentMessage($userId, $recipient, $logMessageText);
         
         $sent++;
         

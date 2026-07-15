@@ -15,8 +15,15 @@ class WhatsAppService
 
     public function sendPayload(string $phoneNumberId, array $payload, ?string $accessToken = null): array
     {
-        $token = $accessToken ?? $this->accessToken;
-        $url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
+        $token = $accessToken ?? $this->accessToken ?? getenv('WHATSAPP_ACCESS_TOKEN') ?: getenv('WHATSAPP_TOKEN') ?: (defined('WHATSAPP_TOKEN') ? WHATSAPP_TOKEN : null);
+        
+        // Resolve Graph API Version from environment
+        $apiVersion = getenv('GRAPH_API_VERSION') ?: 'v20.0';
+        if (strpos($apiVersion, 'v') !== 0) {
+            $apiVersion = 'v' . $apiVersion;
+        }
+        
+        $url = "https://graph.facebook.com/{$apiVersion}/{$phoneNumberId}/messages";
 
         $ch = curl_init($url);
         curl_setopt($ch, CURLOPT_HTTPHEADER, [
@@ -29,7 +36,29 @@ class WhatsAppService
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
         curl_close($ch);
+
+        // Structured diagnostic logging for WHATSAPP_DEBUG_REPORT
+        $logDir = __DIR__ . '/../../logs';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0777, true);
+        }
+        
+        $logData = [
+            'timestamp' => date('Y-m-d H:i:s'),
+            'request_url' => $url,
+            'headers' => [
+                'Authorization' => 'Bearer ' . substr($token, 0, 15) . '...' . substr($token, -10),
+                'Content-Type' => 'application/json'
+            ],
+            'payload' => $payload,
+            'http_code' => $httpCode,
+            'curl_error' => $curlError,
+            'response' => json_decode($response, true) ?: $response
+        ];
+        
+        @file_put_contents($logDir . '/whatsapp_api.log', json_encode($logData) . "\n", FILE_APPEND);
 
         if ($httpCode < 200 || $httpCode >= 300) {
             require_once(__DIR__ . '/LoggerService.php');
@@ -39,6 +68,7 @@ class WhatsAppService
         return [
             'httpCode' => $httpCode,
             'response' => $response,
+            'curlError' => $curlError
         ];
     }
 

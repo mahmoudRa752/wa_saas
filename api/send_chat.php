@@ -69,7 +69,7 @@ if (!$phoneNumberId) {
     exit;
 }
 
-$accessToken   = WHATSAPP_ACCESS_TOKEN;
+$accessToken = getenv('WHATSAPP_TOKEN') ?: (defined('WHATSAPP_TOKEN') ? WHATSAPP_TOKEN : WHATSAPP_ACCESS_TOKEN);
 
 // 2. جلب رقم هاتف العميل من المحادثة الحالية (via ConversationService)
 $convService = new ConversationService(new ConversationRepository($conn));
