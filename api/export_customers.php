@@ -15,8 +15,8 @@ use Core\Customer\CustomerRepository;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
-if (!isset($_SESSION['company_id'])) {
-    die("Unauthorized");
+if (!isset($_SESSION['company_id']) || $_SESSION['role'] !== 'admin') {
+    die("Access denied");
 }
 
 $ctx = TenantContext::fromSession();

@@ -13,7 +13,7 @@ class CustomerService
     public function __construct(private readonly CustomerRepository $repository) {}
 
     /**
-     * Fetch a paginated list of customers
+     * Fetch a paginated list of customers scoped by employee isolation checks
      */
     public function getPaginatedCustomers(
         TenantContext $ctx,
@@ -22,11 +22,13 @@ class CustomerService
         int $page = 1,
         int $limit = 20,
         string $sortBy = 'created_at',
-        string $sortOrder = 'DESC'
+        string $sortOrder = 'DESC',
+        ?string $role = null,
+        ?int $userId = null
     ): array {
         $offset = ($page - 1) * $limit;
-        $customers = $this->repository->searchAndFilter($ctx, $filters, $searchQuery, $limit, $offset, $sortBy, $sortOrder);
-        $total = $this->repository->countSearchAndFilter($ctx, $filters, $searchQuery);
+        $customers = $this->repository->searchAndFilter($ctx, $filters, $searchQuery, $limit, $offset, $sortBy, $sortOrder, $role, $userId);
+        $total = $this->repository->countSearchAndFilter($ctx, $filters, $searchQuery, $role, $userId);
         $pages = (int)ceil($total / $limit);
 
         return [
@@ -81,6 +83,15 @@ class CustomerService
             if ($existing && $existing->id !== $customer->id) {
                 return ['success' => false, 'error' => 'Another customer with this mobile number already exists'];
             }
+            
+            // Retain old assignment properties on edit to prevent wipeouts
+            if ($existing) {
+                $customer->assignedTo = $existing->assignedTo;
+                $customer->assignedBy = $existing->assignedBy;
+                $customer->assignedAt = $existing->assignedAt;
+                $customer->assignmentStatus = $existing->assignmentStatus;
+            }
+
             $success = $this->repository->update($customer);
             return ['success' => $success];
         }
@@ -97,17 +108,66 @@ class CustomerService
     /**
      * Fetch list of IDs matching the filters (for bulk selections)
      */
-    public function getFilteredCustomerIds(TenantContext $ctx, array $filters, string $searchQuery): array
+    public function getFilteredCustomerIds(TenantContext $ctx, array $filters, string $searchQuery, ?string $role = null, ?int $userId = null): array
     {
-        return $this->repository->getFilteredIds($ctx, $filters, $searchQuery);
+        return $this->repository->getFilteredIds($ctx, $filters, $searchQuery, $role, $userId);
     }
 
     /**
      * Fetch all customers matching criteria (for full data exports)
      */
-    public function getFilteredCustomers(TenantContext $ctx, array $filters, string $searchQuery): array
+    public function getFilteredCustomers(TenantContext $ctx, array $filters, string $searchQuery, ?string $role = null, ?int $userId = null): array
     {
-        return $this->repository->getFilteredCustomers($ctx, $filters, $searchQuery);
+        return $this->repository->getFilteredCustomers($ctx, $filters, $searchQuery, $role, $userId);
+    }
+
+    /**
+     * Assign, reassign, or unassign customers in bulk and log the action
+     */
+    public function assignCustomers(
+        TenantContext $ctx,
+        array $customerIds,
+        ?int $assignedTo,
+        ?int $assignedBy,
+        string $adminIp
+    ): bool {
+        $status = $assignedTo ? 'pending' : 'unassigned';
+        $assignedAt = $assignedTo ? date('Y-m-d H:i:s') : null;
+
+        $this->repository->bulkUpdateAssignment($ctx, $customerIds, $assignedTo, $assignedBy, $assignedAt, $status);
+
+        // Resolve names for Audit Log Description
+        $employeeName = 'Unassigned';
+        if ($assignedTo) {
+            $employeeName = $this->getEmployeeNameById($assignedTo);
+        }
+        $count = count($customerIds);
+        $action = $assignedTo ? 'assign_customers' : 'unassign_customers';
+        $description = "Admin assigned $count customers to Employee '$employeeName'. IP: $adminIp";
+        if (!$assignedTo) {
+            $description = "Admin unassigned $count customers. IP: $adminIp";
+        }
+
+        $audit = new \Core\Services\AuditLogService($this->repository->getDbConnection());
+        $audit->log($ctx->companyId, $assignedBy, $action, $description);
+
+        return true;
+    }
+
+    /**
+     * Accept assignments and update customer records
+     */
+    public function acceptAssignments(TenantContext $ctx, int $employeeId, array $customerIds): bool
+    {
+        return $this->repository->updateAssignmentStatus($ctx, $employeeId, $customerIds, 'accepted');
+    }
+
+    /**
+     * Reject assignments and return them to the Admin queue (i.e. 'rejected')
+     */
+    public function rejectAssignments(TenantContext $ctx, int $employeeId, array $customerIds): bool
+    {
+        return $this->repository->updateAssignmentStatus($ctx, $employeeId, $customerIds, 'rejected');
     }
 
     /**
@@ -232,7 +292,11 @@ class CustomerService
                     employer: $employer !== '' ? $employer : null,
                     sourceFile: $sourceFile,
                     createdAt: null,
-                    updatedAt: null
+                    updatedAt: null,
+                    assignedTo: null,
+                    assignedBy: null,
+                    assignedAt: null,
+                    assignmentStatus: 'unassigned'
                 );
                 $this->repository->create($customer);
                 $importedCount++;
@@ -248,6 +312,23 @@ class CustomerService
             'duplicates' => $duplicateCount,
             'invalid_mobiles' => $invalidCount
         ];
+    }
+
+    /**
+     * Query employee name by ID
+     */
+    private function getEmployeeNameById(int $id): string
+    {
+        $db = $this->repository->getDbConnection();
+        $stmt = $db->prepare("SELECT name FROM users WHERE id = ? LIMIT 1");
+        if ($stmt) {
+            $stmt->bind_param("i", $id);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+            return $row['name'] ?? 'Unknown Employee';
+        }
+        return 'Unknown Employee';
     }
 
     /**

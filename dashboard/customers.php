@@ -13,6 +13,7 @@ require_once(__DIR__ . '/../core/Customer/CustomerService.php');
 require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
 require_once(__DIR__ . '/../core/SavedReply/SavedReply.php');
 require_once(__DIR__ . '/../core/SavedReply/SavedReplyRepository.php');
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
 
 use Core\TenantContext;
 use Core\Customer\Customer;
@@ -20,6 +21,7 @@ use Core\Customer\CustomerRepository;
 use Core\Customer\CustomerService;
 use Core\Auth\CsrfHelper;
 use Core\SavedReply\SavedReplyRepository;
+use Core\Company\CompanyRepository;
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -28,13 +30,24 @@ if (!isset($_SESSION['company_id'])) {
 
 $ctx = TenantContext::fromSession();
 $companyId = $ctx->companyId;
+$role = $_SESSION['role'];
+$userId = (int)$_SESSION['user_id'];
+$isAdmin = ($role === 'admin');
 
 $customerRepo = new CustomerRepository($conn);
 $customerService = new CustomerService($customerRepo);
 $savedReplyRepo = new SavedReplyRepository($conn);
+$companyRepo = new CompanyRepository($conn);
 
 // Fetch Canned replies for templates selector
 $cannedReplies = $savedReplyRepo->findAll($ctx);
+
+// Fetch employees list for selector & mapping
+$employeesList = $companyRepo->getEmployees($companyId);
+$employeesMap = [];
+foreach ($employeesList as $emp) {
+    $employeesMap[$emp['id']] = $emp['name'];
+}
 
 // Gather request filters
 $filters = [
@@ -45,6 +58,8 @@ $filters = [
     'program_name' => $_GET['program_name'] ?? '',
     'imported_date' => $_GET['imported_date'] ?? '',
     'national_id_status' => $_GET['national_id_status'] ?? '',
+    'assigned_to_user' => $_GET['assigned_to_user'] ?? '',
+    'assignment_status' => $_GET['assignment_status'] ?? '',
 ];
 $searchQuery = trim($_GET['q'] ?? '');
 $page = max(1, (int)($_GET['page'] ?? 1));
@@ -62,95 +77,101 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     $csrfToken = $_POST['csrf_token'] ?? '';
     $csrfAction = $_POST['csrf_action'] ?? 'customers_crm';
     if (!CsrfHelper::validateToken($csrfToken, $csrfAction)) {
-        $error = "✗ Invalid security token. Action cancelled.";
+        $error = "Access Denied: Invalid security token.";
     } else {
         $action = $_POST['action'];
 
-        if ($action === 'import_customers') {
-            if (isset($_FILES['excel_file']) && $_FILES['excel_file']['tmp_name'] !== '') {
-                $report = $customerService->importFromFile($ctx, $_FILES['excel_file']['tmp_name'], $_FILES['excel_file']['name']);
-                if ($report['success']) {
-                    $success = "✓ Spreadsheet imported successfully!";
-                    $importReport = $report;
+        // Role restriction checks
+        if (!$isAdmin && in_array($action, ['import_customers', 'delete_customer', 'assign_customers'])) {
+            $error = "Access Denied: Employees are unauthorized to execute this command.";
+        } else {
+            if ($action === 'import_customers') {
+                if (isset($_FILES['excel_file']) && $_FILES['excel_file']['tmp_name'] !== '') {
+                    $report = $customerService->importFromFile($ctx, $_FILES['excel_file']['tmp_name'], $_FILES['excel_file']['name']);
+                    if ($report['success']) {
+                        $success = "✓ Spreadsheet imported successfully!";
+                        $importReport = $report;
+                    } else {
+                        $error = "✗ Import failed: " . $report['error'];
+                    }
                 } else {
-                    $error = "✗ Import failed: " . $report['error'];
+                    $error = "✗ Please select a file to upload.";
                 }
-            } else {
-                $error = "✗ Please select a file to upload.";
             }
-        }
 
-        elseif ($action === 'save_customer') {
-            $id = !empty($_POST['id']) ? (int)$_POST['id'] : null;
-            $customer = new Customer(
-                id: $id,
-                companyId: $companyId,
-                fullNameAr: trim($_POST['full_name_ar'] ?? '') ?: null,
-                fullNameEn: trim($_POST['full_name_en'] ?? '') ?: null,
-                mobile: trim($_POST['mobile']),
-                nationalId: trim($_POST['national_id'] ?? '') ?: null,
-                nationality: trim($_POST['nationality'] ?? '') ?: null,
-                gender: trim($_POST['gender'] ?? '') ?: null,
-                projectName: trim($_POST['project_name'] ?? '') ?: null,
-                programName: trim($_POST['program_name'] ?? '') ?: null,
-                employer: trim($_POST['employer'] ?? '') ?: null,
-                sourceFile: $id ? null : 'Manual Entry',
-                createdAt: null,
-                updatedAt: null
-            );
+            elseif ($action === 'save_customer') {
+                $id = !empty($_POST['id']) ? (int)$_POST['id'] : null;
+                $customer = new Customer(
+                    id: $id,
+                    companyId: $companyId,
+                    fullNameAr: trim($_POST['full_name_ar'] ?? '') ?: null,
+                    fullNameEn: trim($_POST['full_name_en'] ?? '') ?: null,
+                    mobile: trim($_POST['mobile']),
+                    nationalId: trim($_POST['national_id'] ?? '') ?: null,
+                    nationality: trim($_POST['nationality'] ?? '') ?: null,
+                    gender: trim($_POST['gender'] ?? '') ?: null,
+                    projectName: trim($_POST['project_name'] ?? '') ?: null,
+                    programName: trim($_POST['program_name'] ?? '') ?: null,
+                    employer: trim($_POST['employer'] ?? '') ?: null,
+                    sourceFile: $id ? null : 'Manual Entry',
+                    createdAt: null,
+                    updatedAt: null
+                );
 
-            $res = $customerService->saveCustomer($ctx, $customer);
-            if ($res['success']) {
-                $success = "✓ Customer saved successfully!";
-            } else {
-                $error = "✗ Failed to save customer: " . $res['error'];
+                $res = $customerService->saveCustomer($ctx, $customer);
+                if ($res['success']) {
+                    $success = "✓ Customer saved successfully!";
+                } else {
+                    $error = "✗ Failed to save customer: " . $res['error'];
+                }
             }
-        }
 
-        elseif ($action === 'delete_customer') {
-            $id = (int)$_POST['id'];
-            if ($customerService->deleteCustomer($ctx, $id)) {
-                $success = "✓ Customer deleted successfully!";
-            } else {
-                $error = "✗ Failed to delete customer.";
+            elseif ($action === 'delete_customer') {
+                $id = (int)$_POST['id'];
+                if ($customerService->deleteCustomer($ctx, $id)) {
+                    $success = "✓ Customer deleted successfully!";
+                } else {
+                    $error = "✗ Failed to delete customer.";
+                }
             }
-        }
 
-        elseif ($action === 'send_whatsapp') {
-            $targetType = $_POST['target_type'] ?? 'selected';
-            $mobiles = [];
+            elseif ($action === 'assign_customers') {
+                $assignedTo = !empty($_POST['assignee_id']) ? (int)$_POST['assignee_id'] : null;
+                $targetType = $_POST['target_type'] ?? 'selected';
+                $ids = [];
 
-            if ($targetType === 'selected') {
-                $ids = isset($_POST['selected_ids']) ? array_map('intval', $_POST['selected_ids']) : [];
-                if (!empty($ids)) {
-                    $inClause = implode(',', array_fill(0, count($ids), '?'));
-                    $sql = "SELECT mobile FROM customers WHERE company_id = ? AND id IN ($inClause)";
-                    $stmt = $conn->prepare($sql);
-                    if ($stmt) {
-                        $types = 'i' . str_repeat('i', count($ids));
-                        $params = array_merge([$companyId], $ids);
-                        $stmt->bind_param($types, ...$params);
-                        $stmt->execute();
-                        $res = $stmt->get_result();
-                        while ($row = $res->fetch_row()) {
-                            $mobiles[] = $row[0];
-                        }
-                        $stmt->close();
+                if ($targetType === 'selected') {
+                    $ids = isset($_POST['selected_ids']) ? array_map('intval', $_POST['selected_ids']) : [];
+                } else {
+                    $ids = $customerService->getFilteredCustomerIds($ctx, $filters, $searchQuery, $role, $userId);
+                }
+
+                if (empty($ids)) {
+                    $error = "✗ No customers selected for assignment.";
+                } else {
+                    $adminIp = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+                    $assignedBy = (int)$_SESSION['user_id'];
+                    if ($customerService->assignCustomers($ctx, $ids, $assignedTo, $assignedBy, $adminIp)) {
+                        $success = "✓ Successfully processed assignments for " . count($ids) . " customers.";
+                    } else {
+                        $error = "✗ Failed to process customer assignments.";
                     }
                 }
-            } else {
-                // Fetch entire filtered list
-                $ids = $customerService->getFilteredCustomerIds($ctx, $filters, $searchQuery);
-                if (!empty($ids)) {
-                    // Chunk query to avoid limit constraints on parameter bindings
-                    $chunks = array_chunk($ids, 1000);
-                    foreach ($chunks as $chunk) {
-                        $inClause = implode(',', array_fill(0, count($chunk), '?'));
+            }
+
+            elseif ($action === 'send_whatsapp') {
+                $targetType = $_POST['target_type'] ?? 'selected';
+                $mobiles = [];
+
+                if ($targetType === 'selected') {
+                    $ids = isset($_POST['selected_ids']) ? array_map('intval', $_POST['selected_ids']) : [];
+                    if (!empty($ids)) {
+                        $inClause = implode(',', array_fill(0, count($ids), '?'));
                         $sql = "SELECT mobile FROM customers WHERE company_id = ? AND id IN ($inClause)";
                         $stmt = $conn->prepare($sql);
                         if ($stmt) {
-                            $types = 'i' . str_repeat('i', count($chunk));
-                            $params = array_merge([$companyId], $chunk);
+                            $types = 'i' . str_repeat('i', count($ids));
+                            $params = array_merge([$companyId], $ids);
                             $stmt->bind_param($types, ...$params);
                             $stmt->execute();
                             $res = $stmt->get_result();
@@ -160,54 +181,75 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                             $stmt->close();
                         }
                     }
-                }
-            }
-
-            $mobiles = array_unique(array_filter($mobiles));
-            $totalRecipients = count($mobiles);
-
-            if ($totalRecipients === 0) {
-                $error = "✗ No valid recipients found.";
-            } else {
-                $sendType = $_POST['send_type'] ?? 'text';
-                $messageText = trim($_POST['message_text'] ?? '');
-                $templateName = null;
-                $templateLanguage = 'en_US';
-
-                if ($sendType === 'template') {
-                    $templateName = trim($_POST['template_name'] ?? '');
-                    $templateLanguage = trim($_POST['template_language'] ?? 'en_US');
-                    $messageText = "Meta Template Broadcast campaign";
-                }
-
-                $campaignName = "CRM Send - " . date('Y-m-d H:i');
-                $recipientsString = implode(',', $mobiles);
-
-                $stmt = $conn->prepare("
-                    INSERT INTO broadcast_campaigns (company_id, user_id, name, message_text, recipients, scheduled_at, total_contacts, status, template_name, template_language)
-                    VALUES (?, ?, ?, ?, ?, NOW(), ?, 'scheduled', ?, ?)
-                ");
-                $creatorId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
-                $stmt->bind_param("iisssisss", $companyId, $creatorId, $campaignName, $messageText, $recipientsString, $totalRecipients, $templateName, $templateLanguage);
-                if ($stmt->execute()) {
-                    $success = "✓ WhatsApp Bulk Broadcast initiated successfully! Campaign processing in background.";
-                    pclose(popen("start /B php " . escapeshellarg(__DIR__ . '/../cron/process_broadcasts.php'), "r"));
                 } else {
-                    $error = "✗ Failed to create campaign: " . $stmt->error;
+                    $ids = $customerService->getFilteredCustomerIds($ctx, $filters, $searchQuery, $role, $userId);
+                    if (!empty($ids)) {
+                        $chunks = array_chunk($ids, 1000);
+                        foreach ($chunks as $chunk) {
+                            $inClause = implode(',', array_fill(0, count($chunk), '?'));
+                            $sql = "SELECT mobile FROM customers WHERE company_id = ? AND id IN ($inClause)";
+                            $stmt = $conn->prepare($sql);
+                            if ($stmt) {
+                                $types = 'i' . str_repeat('i', count($chunk));
+                                $params = array_merge([$companyId], $chunk);
+                                $stmt->bind_param($types, ...$params);
+                                $stmt->execute();
+                                $res = $stmt->get_result();
+                                while ($row = $res->fetch_row()) {
+                                    $mobiles[] = $row[0];
+                                }
+                                $stmt->close();
+                            }
+                        }
+                    }
                 }
-                $stmt->close();
+
+                $mobiles = array_unique(array_filter($mobiles));
+                $totalRecipients = count($mobiles);
+
+                if ($totalRecipients === 0) {
+                    $error = "✗ No valid recipients found.";
+                } else {
+                    $sendType = $_POST['send_type'] ?? 'text';
+                    $messageText = trim($_POST['message_text'] ?? '');
+                    $templateName = null;
+                    $templateLanguage = 'en_US';
+
+                    if ($sendType === 'template') {
+                        $templateName = trim($_POST['template_name'] ?? '');
+                        $templateLanguage = trim($_POST['template_language'] ?? 'en_US');
+                        $messageText = "Meta Template Broadcast campaign";
+                    }
+
+                    $campaignName = "CRM Send - " . date('Y-m-d H:i');
+                    $recipientsString = implode(',', $mobiles);
+
+                    $stmt = $conn->prepare("
+                        INSERT INTO broadcast_campaigns (company_id, user_id, name, message_text, recipients, scheduled_at, total_contacts, status, template_name, template_language)
+                        VALUES (?, ?, ?, ?, ?, NOW(), ?, 'scheduled', ?, ?)
+                    ");
+                    $creatorId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+                    $stmt->bind_param("iisssisss", $companyId, $creatorId, $campaignName, $messageText, $recipientsString, $totalRecipients, $templateName, $templateLanguage);
+                    if ($stmt->execute()) {
+                        $success = "✓ WhatsApp Bulk Broadcast initiated successfully! Campaign processing in background.";
+                        pclose(popen("start /B php " . escapeshellarg(__DIR__ . '/../cron/process_broadcasts.php'), "r"));
+                    } else {
+                        $error = "✗ Failed to create campaign: " . $stmt->error;
+                    }
+                    $stmt->close();
+                }
             }
         }
     }
 }
 
-// Fetch lists matching filters
-$results = $customerService->getPaginatedCustomers($ctx, $filters, $searchQuery, $page, $limit, $sortBy, $sortOrder);
+// Fetch lists matching filters & roles scoping
+$results = $customerService->getPaginatedCustomers($ctx, $filters, $searchQuery, $page, $limit, $sortBy, $sortOrder, $role, $userId);
 $customersList = $results['data'];
 $totalCount = $results['total'];
 $totalPages = $results['pages'];
 
-// Fetch filter dropdown selectors dynamically from the repository
+// Fetch filter dropdown selectors dynamically
 $dropdowns = $customerService->getFilterDropdowns($ctx);
 
 include("../layouts/header.php");
@@ -239,11 +281,13 @@ include("../layouts/header.php");
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
         <div>
             <h5 class="fw-bold text-dark mb-0"><i class="bi bi-people-fill text-primary me-2"></i>Customer Manager (CRM)</h5>
-            <small class="text-secondary">Manage contact data sheet imports, run segment filters, and dispatch bulk WhatsApp messages.</small>
+            <small class="text-secondary"><?php echo $isAdmin ? 'Manage contact database sheet imports, assign records, and execute campaigns.' : 'View and manage customers assigned to your account.'; ?></small>
         </div>
         <div class="d-flex gap-2">
-            <button class="btn btn-primary btn-sm px-3 fw-semibold" data-bs-toggle="modal" data-bs-target="#modal-add-customer"><i class="bi bi-plus-lg me-1"></i> Add Customer</button>
-            <button class="btn btn-success btn-sm px-3 fw-semibold" data-bs-toggle="modal" data-bs-target="#modal-import-customers"><i class="bi bi-file-earmark-excel me-1"></i> Import Sheet</button>
+            <?php if ($isAdmin): ?>
+                <button class="btn btn-primary btn-sm px-3 fw-semibold" data-bs-toggle="modal" data-bs-target="#modal-add-customer"><i class="bi bi-plus-lg me-1"></i> Add Customer</button>
+                <button class="btn btn-success btn-sm px-3 fw-semibold" data-bs-toggle="modal" data-bs-target="#modal-import-customers"><i class="bi bi-file-earmark-excel me-1"></i> Import Sheet</button>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -255,7 +299,7 @@ include("../layouts/header.php");
             <label class="form-label text-secondary fw-semibold small mb-1">Global Search</label>
             <div class="input-group input-group-sm">
                 <span class="input-group-text bg-light text-secondary border-end-0"><i class="bi bi-search"></i></span>
-                <input type="text" name="q" value="<?php echo htmlspecialchars($searchQuery); ?>" placeholder="Search Name, Mobile, Employer, ID, Project..." class="form-control form-control-sm border-start-0">
+                <input type="text" name="q" value="<?php echo htmlspecialchars($searchQuery); ?>" placeholder="Search Name, Mobile, Employer, ID..." class="form-control form-control-sm border-start-0">
             </div>
         </div>
         <div class="col-md-2">
@@ -292,7 +336,7 @@ include("../layouts/header.php");
     </div>
     
     <div class="row g-2 align-items-end">
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label text-secondary fw-semibold small mb-1">Project</label>
             <select name="project_name" class="form-select form-select-sm">
                 <option value="">All Projects</option>
@@ -301,7 +345,7 @@ include("../layouts/header.php");
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label text-secondary fw-semibold small mb-1">Program</label>
             <select name="program_name" class="form-select form-select-sm">
                 <option value="">All Programs</option>
@@ -310,7 +354,7 @@ include("../layouts/header.php");
                 <?php endforeach; ?>
             </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2">
             <label class="form-label text-secondary fw-semibold small mb-1">National ID Status</label>
             <select name="national_id_status" class="form-select form-select-sm">
                 <option value="">All</option>
@@ -318,7 +362,28 @@ include("../layouts/header.php");
                 <option value="missing" <?php echo $filters['national_id_status'] === 'missing' ? 'selected' : ''; ?>>Missing ID/Residence</option>
             </select>
         </div>
-        <div class="col-md-3 d-flex gap-2">
+        <?php if ($isAdmin): ?>
+            <div class="col-md-2">
+                <label class="form-label text-secondary fw-semibold small mb-1">Assigned Employee</label>
+                <select name="assigned_to_user" class="form-select form-select-sm">
+                    <option value="">All Employees</option>
+                    <?php foreach($employeesList as $emp): ?>
+                        <option value="<?php echo $emp['id']; ?>" <?php echo $filters['assigned_to_user'] == $emp['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($emp['name']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label text-secondary fw-semibold small mb-1">Assignment Status</label>
+                <select name="assignment_status" class="form-select form-select-sm">
+                    <option value="">All</option>
+                    <option value="unassigned" <?php echo $filters['assignment_status'] === 'unassigned' ? 'selected' : ''; ?>>Unassigned</option>
+                    <option value="pending" <?php echo $filters['assignment_status'] === 'pending' ? 'selected' : ''; ?>>Pending Acceptance</option>
+                    <option value="accepted" <?php echo $filters['assignment_status'] === 'accepted' ? 'selected' : ''; ?>>Accepted</option>
+                    <option value="rejected" <?php echo $filters['assignment_status'] === 'rejected' ? 'selected' : ''; ?>>Rejected</option>
+                </select>
+            </div>
+        <?php endif; ?>
+        <div class="<?php echo $isAdmin ? 'col-md-2' : 'col-md-6'; ?> d-flex gap-2">
             <button type="submit" class="btn btn-primary btn-sm flex-fill fw-semibold"><i class="bi bi-filter me-1"></i> Apply Filters</button>
             <a href="customers.php" class="btn btn-outline-secondary btn-sm px-3 fw-semibold"><i class="bi bi-arrow-counterclockwise"></i></a>
         </div>
@@ -334,8 +399,13 @@ include("../layouts/header.php");
         <span id="all-selected-indicator" class="badge bg-success d-none">All matches selected</span>
     </div>
     <div class="d-flex gap-2">
+        <?php if ($isAdmin): ?>
+            <button type="button" class="btn btn-warning btn-sm fw-semibold" onclick="openBulkAssignModal()"><i class="bi bi-person-plus me-1"></i> Assign Customers</button>
+        <?php endif; ?>
         <button type="button" class="btn btn-primary btn-sm fw-semibold" onclick="openBulkWhatsAppModal()"><i class="bi bi-whatsapp me-1"></i> Send WhatsApp</button>
-        <button type="button" class="btn btn-outline-light btn-sm fw-semibold" onclick="triggerExcelExport()"><i class="bi bi-download me-1"></i> Export Excel</button>
+        <?php if ($isAdmin): ?>
+            <button type="button" class="btn btn-outline-light btn-sm fw-semibold" onclick="triggerExcelExport()"><i class="bi bi-download me-1"></i> Export Excel</button>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -346,8 +416,9 @@ include("../layouts/header.php");
             Showing <strong class="text-dark"><?php echo count($customersList); ?></strong> of <strong class="text-dark"><?php echo $totalCount; ?></strong> customers.
         </div>
         <div>
-            <!-- Excel Export all/current filter button -->
-            <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" onclick="exportFullFiltered()"><i class="bi bi-file-earmark-arrow-down me-1"></i> Export Filtered</button>
+            <?php if ($isAdmin): ?>
+                <button type="button" class="btn btn-outline-primary btn-sm fw-semibold" onclick="exportFullFiltered()"><i class="bi bi-file-earmark-arrow-down me-1"></i> Export Filtered</button>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -365,14 +436,17 @@ include("../layouts/header.php");
                     <th>Program</th>
                     <th>Nationality</th>
                     <th>Gender</th>
-                    <th>Created At</th>
+                    <?php if ($isAdmin): ?>
+                        <th>Assigned To</th>
+                        <th>Status</th>
+                    <?php endif; ?>
                     <th width="100" class="text-center">Actions</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (empty($customersList)): ?>
                     <tr>
-                        <td colspan="12" class="text-center text-muted py-4">No customers found. Import a spreadsheet or add manually.</td>
+                        <td colspan="<?php echo $isAdmin ? 13 : 11; ?>" class="text-center text-muted py-4">No customers found.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($customersList as $cust): ?>
@@ -387,17 +461,42 @@ include("../layouts/header.php");
                             <td><?php echo htmlspecialchars($cust->programName ?? '-'); ?></td>
                             <td><?php echo htmlspecialchars($cust->nationality ?? '-'); ?></td>
                             <td><?php echo htmlspecialchars($cust->gender ?? '-'); ?></td>
-                            <td><small class="text-secondary"><?php echo date('Y-m-d', strtotime($cust->createdAt)); ?></small></td>
+                            <?php if ($isAdmin): ?>
+                                <td>
+                                    <?php 
+                                    if ($cust->assignedTo) {
+                                        echo '<span class="badge bg-dark">' . htmlspecialchars($employeesMap[$cust->assignedTo] ?? 'Employee') . '</span>';
+                                    } else {
+                                        echo '<span class="badge bg-secondary">Unassigned</span>';
+                                    }
+                                    ?>
+                                </td>
+                                <td>
+                                    <?php
+                                    if ($cust->assignmentStatus === 'accepted') {
+                                        echo '<span class="badge bg-success">Accepted</span>';
+                                    } elseif ($cust->assignmentStatus === 'pending') {
+                                        echo '<span class="badge bg-warning text-dark">Pending</span>';
+                                    } elseif ($cust->assignmentStatus === 'rejected') {
+                                        echo '<span class="badge bg-danger">Rejected</span>';
+                                    } else {
+                                        echo '<span class="badge bg-light text-dark border">Unassigned</span>';
+                                    }
+                                    ?>
+                                </td>
+                            <?php endif; ?>
                             <td class="text-center">
                                 <div class="d-flex justify-content-center gap-1">
                                     <button class="btn btn-outline-primary btn-xs py-0 px-2" style="font-size:11px;" onclick="viewCustomerDetails(<?php echo htmlspecialchars(json_encode($cust->toArray())); ?>)"><i class="bi bi-eye"></i></button>
                                     <button class="btn btn-outline-warning btn-xs py-0 px-2" style="font-size:11px;" onclick="openEditCustomerModal(<?php echo htmlspecialchars(json_encode($cust->toArray())); ?>)"><i class="bi bi-pencil"></i></button>
-                                    <form method="POST" action="" onsubmit="return confirm('Are you sure you want to delete this customer?');" style="margin:0;">
-                                        <input type="hidden" name="action" value="delete_customer">
-                                        <input type="hidden" name="id" value="<?php echo $cust->id; ?>">
-                                        <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
-                                        <button type="submit" class="btn btn-outline-danger btn-xs py-0 px-2" style="font-size:11px;"><i class="bi bi-trash"></i></button>
-                                    </form>
+                                    <?php if ($isAdmin): ?>
+                                        <form method="POST" action="" onsubmit="return confirm('Are you sure you want to delete this customer?');" style="margin:0;">
+                                            <input type="hidden" name="action" value="delete_customer">
+                                            <input type="hidden" name="id" value="<?php echo $cust->id; ?>">
+                                            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
+                                            <button type="submit" class="btn btn-outline-danger btn-xs py-0 px-2" style="font-size:11px;"><i class="bi bi-trash"></i></button>
+                                        </form>
+                                    <?php endif; ?>
                                 </div>
                             </td>
                         </tr>
@@ -431,7 +530,45 @@ include("../layouts/header.php");
      MODALS
      ========================================== -->
 
+<!-- Assign Modal -->
+<?php if ($isAdmin): ?>
+<div class="modal fade" id="modal-bulk-assign" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <input type="hidden" name="action" value="assign_customers">
+                <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
+                <input type="hidden" name="target_type" id="assign-target-type" value="selected">
+                <div id="assign-ids-container"></div>
+
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-person-plus text-primary me-2"></i>Assign Customers</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" style="font-size:13px;">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-secondary">Choose Employee Account</label>
+                        <select name="assignee_id" class="form-select form-select-sm" required>
+                            <option value="">-- Unassign (Remove Owner) --</option>
+                            <?php foreach ($employeesList as $emp): ?>
+                                <option value="<?php echo $emp['id']; ?>"><?php echo htmlspecialchars($emp['name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text" style="font-size:11px;">Selecting an employee moves these customers to their "Pending Acceptance" inbox. Leaving it blank unassigns the records.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Save Assignment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Import Modal -->
+<?php if ($isAdmin): ?>
 <div class="modal fade" id="modal-import-customers" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -447,20 +584,6 @@ include("../layouts/header.php");
                     <div class="mb-3">
                         <label class="form-label fw-semibold text-secondary">Spreadsheet File (.xlsx, .xls, .csv)</label>
                         <input type="file" name="excel_file" accept=".xlsx, .xls, .csv" required class="form-control form-control-sm">
-                        <div class="form-text" style="font-size:11px;">Select a contact sheet. Mobile number columns (synonyms like جوال or mobile) are auto-mapped.</div>
-                    </div>
-                    
-                    <div class="p-3 bg-light border rounded">
-                        <h6 class="fw-bold mb-2" style="font-size:12.5px;">Auto-Mapping Syntax Rules:</h6>
-                        <ul class="mb-0 text-secondary ps-3" style="font-size:11.5px;">
-                            <li><strong>Mobile</strong>: جوال, هاتف, تليفون, mobile, phone</li>
-                            <li><strong>Arabic Name</strong>: الاسم عربي, الاسم بالكامل عربي, name_ar</li>
-                            <li><strong>English Name</strong>: الاسم انجليزي, الاسم بالكامل انجليزي, name_en</li>
-                            <li><strong>National ID</strong>: الهوية الوطنية, رقم الهوية, national_id, iqama</li>
-                            <li><strong>Nationality</strong>: الجنسية, nationality</li>
-                            <li><strong>Gender</strong>: النوع, الجنس, gender, sex</li>
-                            <li><strong>Employer</strong>: جهة العمل, employer, company</li>
-                        </ul>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -471,6 +594,7 @@ include("../layouts/header.php");
         </div>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- Add / Edit Modal -->
 <div class="modal fade" id="modal-add-customer" tabindex="-1" aria-hidden="true">
@@ -564,7 +688,6 @@ include("../layouts/header.php");
                 <input type="hidden" name="action" value="send_whatsapp">
                 <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
                 <input type="hidden" name="target_type" id="whatsapp-target-type" value="selected">
-                <!-- Keep inputs for bulk selections -->
                 <div id="selected-ids-container"></div>
                 
                 <div class="modal-header">
@@ -597,7 +720,6 @@ include("../layouts/header.php");
                         </div>
                     </div>
 
-                    <!-- Free Text Form -->
                     <div id="section-free-text">
                         <div class="mb-3">
                             <label class="form-label fw-semibold text-secondary">Insert Saved Quick Reply</label>
@@ -610,17 +732,15 @@ include("../layouts/header.php");
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-semibold text-secondary">Message Content</label>
-                            <textarea name="message_text" id="wa-message-text" rows="5" class="form-control form-control-sm" placeholder="Write your broadcast message... Use variables like {name_ar} or {name_en} which are parsed client-side!"></textarea>
+                            <textarea name="message_text" id="wa-message-text" rows="5" class="form-control form-control-sm" placeholder="Write your broadcast message..."></textarea>
                         </div>
                     </div>
 
-                    <!-- Template Form -->
                     <div id="section-template" class="d-none">
                         <div class="row g-2 mb-3">
                             <div class="col-md-8">
                                 <label class="form-label fw-semibold text-secondary">Official Meta Template Name</label>
                                 <input type="text" name="template_name" id="wa-template-name" placeholder="e.g. hello_world" class="form-control form-control-sm">
-                                <small class="text-muted" style="font-size:11px;">Must exactly match the template name registered in Meta App dashboard.</small>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label fw-semibold text-secondary">Language Code</label>
@@ -639,26 +759,28 @@ include("../layouts/header.php");
 </div>
 
 <script>
-// Keep track of check selections
 const selectedIds = new Set();
 let selectAllFiltered = false;
+const employeesMap = <?php echo json_encode($employeesMap); ?>;
 
 document.addEventListener('DOMContentLoaded', () => {
     const checkAll = document.getElementById('check-all');
     const rowCheckboxes = document.querySelectorAll('.row-checkbox');
 
-    checkAll.addEventListener('change', (e) => {
-        const checked = e.target.checked;
-        rowCheckboxes.forEach(cb => {
-            cb.checked = checked;
-            if (checked) {
-                selectedIds.add(parseInt(cb.value));
-            } else {
-                selectedIds.delete(parseInt(cb.value));
-            }
+    if (checkAll) {
+        checkAll.addEventListener('change', (e) => {
+            const checked = e.target.checked;
+            rowCheckboxes.forEach(cb => {
+                cb.checked = checked;
+                if (checked) {
+                    selectedIds.add(parseInt(cb.value));
+                } else {
+                    selectedIds.delete(parseInt(cb.value));
+                }
+            });
+            updateBulkBanner();
         });
-        updateBulkBanner();
-    });
+    }
 
     rowCheckboxes.forEach(cb => {
         cb.addEventListener('change', (e) => {
@@ -668,17 +790,20 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 selectedIds.delete(val);
             }
-            // Check if check-all needs updating
-            checkAll.checked = (selectedIds.size === rowCheckboxes.length);
+            if (checkAll) {
+                checkAll.checked = (selectedIds.size === rowCheckboxes.length);
+            }
             updateBulkBanner();
         });
     });
 
     const selectAllBtn = document.getElementById('select-all-filtered-btn');
-    selectAllBtn.addEventListener('click', () => {
-        selectAllFiltered = true;
-        updateBulkBanner();
-    });
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', () => {
+            selectAllFiltered = true;
+            updateBulkBanner();
+        });
+    }
 });
 
 function updateBulkBanner() {
@@ -693,16 +818,15 @@ function updateBulkBanner() {
 
         if (selectAllFiltered) {
             countDisplay.innerText = "<?php echo $totalCount; ?>";
-            selectAllBtn.classList.add('d-none');
-            allSelectedIndicator.classList.remove('d-none');
+            if (selectAllBtn) selectAllBtn.classList.add('d-none');
+            if (allSelectedIndicator) allSelectedIndicator.classList.remove('d-none');
         } else {
             countDisplay.innerText = selectedIds.size;
-            allSelectedIndicator.classList.add('d-none');
-            // Show select all button if there are more filtered rows than selected on this page
+            if (allSelectedIndicator) allSelectedIndicator.classList.add('d-none');
             if (selectedIds.size < <?php echo $totalCount; ?>) {
-                selectAllBtn.classList.remove('d-none');
+                if (selectAllBtn) selectAllBtn.classList.remove('d-none');
             } else {
-                selectAllBtn.classList.add('d-none');
+                if (selectAllBtn) selectAllBtn.classList.add('d-none');
             }
         }
     } else {
@@ -713,7 +837,6 @@ function updateBulkBanner() {
 }
 
 function openBulkWhatsAppModal() {
-    // Populate selections inside hidden form fields
     const container = document.getElementById('selected-ids-container');
     container.innerHTML = '';
 
@@ -737,6 +860,26 @@ function openBulkWhatsAppModal() {
     modal.show();
 }
 
+function openBulkAssignModal() {
+    const container = document.getElementById('assign-ids-container');
+    container.innerHTML = '';
+
+    document.getElementById('assign-target-type').value = selectAllFiltered ? 'filtered' : 'selected';
+
+    if (!selectAllFiltered) {
+        selectedIds.forEach(id => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selected_ids[]';
+            input.value = id;
+            container.appendChild(input);
+        });
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('modal-bulk-assign'));
+    modal.show();
+}
+
 function toggleWhatsAppSendType(type) {
     const sectionText = document.getElementById('section-free-text');
     const sectionTemplate = document.getElementById('section-template');
@@ -755,8 +898,7 @@ function toggleWhatsAppSendType(type) {
 }
 
 function insertQuickReplyText(text) {
-    const textInput = document.getElementById('wa-message-text');
-    textInput.value = text;
+    document.getElementById('wa-message-text').value = text;
 }
 
 function triggerExcelExport() {
@@ -769,13 +911,14 @@ function triggerExcelExport() {
 }
 
 function exportFullFiltered() {
-    // Collect all GET query params to export filtered state
     const params = new URLSearchParams(window.location.search);
     window.location.href = '../api/export_customers.php?' + params.toString();
 }
 
 function viewCustomerDetails(cust) {
     const body = document.getElementById('details-modal-body');
+    const ownerName = employeesMap[cust.assigned_to] || 'Unassigned';
+    
     body.innerHTML = `
         <table class="table table-bordered table-sm m-0" style="font-size:13px;">
             <tr><th width="150" class="bg-light">Mobile Number</th><td><code>${cust.mobile}</code></td></tr>
@@ -787,6 +930,8 @@ function viewCustomerDetails(cust) {
             <tr><th class="bg-light">Employer</th><td>${cust.employer || '-'}</td></tr>
             <tr><th class="bg-light">Project Name</th><td>${cust.project_name || '-'}</td></tr>
             <tr><th class="bg-light">Program Name</th><td>${cust.program_name || '-'}</td></tr>
+            <tr><th class="bg-light">Owner / Assignee</th><td><span class="badge bg-dark">${ownerName}</span></td></tr>
+            <tr><th class="bg-light">Assignment Status</th><td><span class="badge bg-secondary">${cust.assignment_status.toUpperCase()}</span></td></tr>
             <tr><th class="bg-light">Source File</th><td>${cust.source_file || '-'}</td></tr>
             <tr><th class="bg-light">Created Date</th><td>${cust.created_at || '-'}</td></tr>
             <tr><th class="bg-light">Last Updated</th><td>${cust.updated_at || '-'}</td></tr>
@@ -813,7 +958,6 @@ function openEditCustomerModal(cust) {
     modal.show();
 }
 
-// Reset form for manual additions
 document.getElementById('modal-add-customer').addEventListener('hidden.bs.modal', function () {
     document.getElementById('customer-modal-title').innerHTML = '<i class="bi bi-person-plus text-primary me-2"></i>Add Manual Customer';
     document.getElementById('customer-id').value = '';

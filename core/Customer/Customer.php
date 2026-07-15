@@ -21,7 +21,11 @@ class Customer
         public ?string $employer,
         public ?string $sourceFile,
         public ?string $createdAt,
-        public ?string $updatedAt
+        public ?string $updatedAt,
+        public ?int $assignedTo = null,
+        public ?int $assignedBy = null,
+        public ?string $assignedAt = null,
+        public ?string $assignmentStatus = 'unassigned'
     ) {}
 
     /**
@@ -43,7 +47,11 @@ class Customer
             employer: $row['employer'] ?? null,
             sourceFile: $row['source_file'] ?? null,
             createdAt: $row['created_at'] ?? null,
-            updatedAt: $row['updated_at'] ?? null
+            updatedAt: $row['updated_at'] ?? null,
+            assignedTo: isset($row['assigned_to']) ? (int)$row['assigned_to'] : null,
+            assignedBy: isset($row['assigned_by']) ? (int)$row['assigned_by'] : null,
+            assignedAt: $row['assigned_at'] ?? null,
+            assignmentStatus: $row['assignment_status'] ?? 'unassigned'
         );
     }
 
@@ -66,7 +74,11 @@ class Customer
             'employer' => $this->employer,
             'source_file' => $this->sourceFile,
             'created_at' => $this->createdAt,
-            'updated_at' => $this->updatedAt
+            'updated_at' => $this->updatedAt,
+            'assigned_to' => $this->assignedTo,
+            'assigned_by' => $this->assignedBy,
+            'assigned_at' => $this->assignedAt,
+            'assignment_status' => $this->assignmentStatus
         ];
     }
 }

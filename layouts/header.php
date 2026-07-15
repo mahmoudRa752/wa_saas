@@ -62,6 +62,7 @@ $titles = [
         'automations.php'      => 'Auto-Replies & Automation',
         'chat.php'             => 'Live Chat',
         'customers.php'        => 'Customer Manager',
+        'customer_inbox.php'   => 'Customer Inbox',
         'search.php'           => 'Advanced Search',
         'internal_chat.php'    => 'Internal Chat',
         'employees.php'        => 'Employees',
@@ -283,6 +284,21 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
             <a href="/wa_saas/dashboard/customers.php" class="nav-link <?php echo $currentPage === 'customers.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-person-lines-fill"></i></span> Customer Manager
             </a>
+            <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'employee'): ?>
+                <a href="/wa_saas/dashboard/customer_inbox.php" class="nav-link <?php echo $currentPage === 'customer_inbox.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-inbox-fill"></i></span> Customer Inbox
+                    <?php
+                    $eId = (int)$_SESSION['user_id'];
+                    $cId = (int)$_SESSION['company_id'];
+                    $cntRes = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $cId AND assigned_to = $eId AND assignment_status = 'pending'");
+                    $cntRow = $cntRes ? $cntRes->fetch_row() : [0];
+                    $pendingCount = (int)($cntRow[0] ?? 0);
+                    if ($pendingCount > 0) {
+                        echo '<span class="badge bg-danger ms-auto rounded-pill">' . $pendingCount . '</span>';
+                    }
+                    ?>
+                </a>
+            <?php endif; ?>
             <a href="/wa_saas/dashboard/search.php" class="nav-link <?php echo $currentPage === 'search.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-search"></i></span> Advanced Search
             </a>
