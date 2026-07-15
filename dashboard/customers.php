@@ -401,31 +401,36 @@ include("../layouts/header.php");
         <div class="<?php echo $isAdmin ? 'col-md-2' : 'col-md-6'; ?> d-flex gap-2">
             <button type="submit" class="btn btn-primary btn-sm flex-fill fw-semibold"><i class="bi bi-filter me-1"></i> Apply Filters</button>
             <a href="customers.php" class="btn btn-outline-secondary btn-sm px-3 fw-semibold"><i class="bi bi-arrow-counterclockwise"></i></a>
-        </div>
-    </div>
-</form>
-
-<!-- Bulk Actions Banner (Floating dynamic alert) -->
-<div id="bulk-actions-banner" class="alert alert-dark p-3 shadow border-0 d-none justify-content-between align-items-center mb-3">
+        <!-- Bulk Actions Banner (Floating dynamic alert) -->
+<div id="bulk-actions-banner" class="alert alert-dark p-3 shadow-lg border-0 d-none justify-content-between align-items-center mb-3" style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 1050px; z-index: 1050; border-radius: 12px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);">
     <div class="d-flex align-items-center gap-2 text-white">
         <i class="bi bi-check2-square text-success fs-5"></i>
-        <span>Selected: <strong id="selected-count">0</strong> customers.</span>
-        <button type="button" id="select-all-filtered-btn" class="btn btn-outline-light btn-sm ms-3 d-none">Select all <?php echo $totalCount; ?> matches</button>
+        <span>Selected: <strong id="selected-count" class="text-warning">0</strong> customers.</span>
+        <button type="button" id="select-all-filtered-btn" class="btn btn-outline-light btn-xs ms-2" style="font-size:11px;">Select all <?php echo $totalCount; ?> matches</button>
         <span id="all-selected-indicator" class="badge bg-success d-none">All matches selected</span>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-1 align-items-center">
+        <button type="button" class="btn btn-primary btn-xs fw-semibold" style="font-size:11px;" onclick="openBulkWhatsAppModal()"><i class="bi bi-whatsapp"></i> Send WhatsApp</button>
         <?php if ($isAdmin): ?>
-            <button type="button" class="btn btn-warning btn-sm fw-semibold" onclick="openBulkAssignModal()"><i class="bi bi-person-plus me-1"></i> Assign Customers</button>
+            <button type="button" class="btn btn-warning btn-xs fw-semibold" style="font-size:11px;" onclick="openBulkAssignModal()"><i class="bi bi-person-plus"></i> Assign Owner</button>
         <?php endif; ?>
-        <button type="button" class="btn btn-primary btn-sm fw-semibold" onclick="openBulkWhatsAppModal()"><i class="bi bi-whatsapp me-1"></i> Send WhatsApp</button>
+        <button type="button" class="btn btn-info btn-xs fw-semibold text-white" style="font-size:11px;" onclick="openBulkTagsModal('add')"><i class="bi bi-tag-fill"></i> Add Tag</button>
+        <button type="button" class="btn btn-outline-info btn-xs fw-semibold" style="font-size:11px;" onclick="openBulkTagsModal('remove')"><i class="bi bi-tag"></i> Remove Tag</button>
+        <button type="button" class="btn btn-secondary btn-xs fw-semibold" style="font-size:11px;" onclick="openBulkNoteModal()"><i class="bi bi-journal-text"></i> Add Note</button>
+        <button type="button" class="btn btn-light btn-xs fw-semibold" style="font-size:11px;" onclick="triggerExcelExport()"><i class="bi bi-download"></i> Export</button>
         <?php if ($isAdmin): ?>
-            <button type="button" class="btn btn-outline-light btn-sm fw-semibold" onclick="triggerExcelExport()"><i class="bi bi-download me-1"></i> Export Excel</button>
+            <button type="button" class="btn btn-danger btn-xs fw-semibold" style="font-size:11px;" onclick="triggerBulkDelete()"><i class="bi bi-trash"></i> Delete</button>
         <?php endif; ?>
+        <button type="button" class="btn btn-outline-light btn-xs fw-semibold" style="font-size:11px;" onclick="clearSelection()"><i class="bi bi-x-lg"></i> Clear</button>
     </div>
 </div>
 
 <!-- Customers Table -->
-<div class="card p-3 shadow-sm border-0">
+<div class="card p-3 shadow-sm border-0 position-relative">
+    <div id="table-loading-overlay" class="position-absolute top-0 start-0 w-100 h-100 d-none d-flex justify-content-center align-items-center" style="background: rgba(255,255,255,0.7); z-index: 100; border-radius:12px;">
+        <div class="spinner-border text-primary" role="status"></div>
+    </div>
+
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div class="small text-secondary">
             Showing <strong class="text-dark"><?php echo count($customersList); ?></strong> of <strong class="text-dark"><?php echo $totalCount; ?></strong> customers.
@@ -465,8 +470,8 @@ include("../layouts/header.php");
                     </tr>
                 <?php else: ?>
                     <?php foreach ($customersList as $cust): ?>
-                        <tr>
-                            <td><input type="checkbox" name="customer_ids[]" value="<?php echo $cust->id; ?>" class="form-check-input row-checkbox" data-mobile="<?php echo htmlspecialchars($cust->mobile); ?>"></td>
+                        <tr data-customer-id="<?php echo $cust->id; ?>">
+                            <td><input type="checkbox" value="<?php echo $cust->id; ?>" class="form-check-input row-checkbox" data-mobile="<?php echo htmlspecialchars($cust->mobile); ?>"></td>
                             <td class="fw-bold"><code><?php echo htmlspecialchars($cust->mobile); ?></code></td>
                             <td><?php echo htmlspecialchars($cust->fullNameAr ?? '-'); ?></td>
                             <td><?php echo htmlspecialchars($cust->fullNameEn ?? '-'); ?></td>
@@ -521,24 +526,26 @@ include("../layouts/header.php");
         </table>
     </div>
 
-    <!-- Pagination Controls -->
-    <?php if ($totalPages > 1): ?>
-        <nav class="d-flex justify-content-center mt-3">
-            <ul class="pagination pagination-sm mb-0">
-                <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>">Previous</a>
-                </li>
-                <?php for ($i = 1; $i <= $totalPages; $i++): ?>
-                    <li class="page-item <?php echo $page === $i ? 'active' : ''; ?>">
-                        <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"><?php echo $i; ?></a>
+    <!-- Pagination Controls wrapper -->
+    <div class="pagination-wrapper">
+        <?php if ($totalPages > 1): ?>
+            <nav class="d-flex justify-content-center mt-3">
+                <ul class="pagination pagination-sm mb-0">
+                    <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>">Previous</a>
                     </li>
-                <?php endfor; ?>
-                <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
-                    <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>">Next</a>
-                </li>
-            </ul>
-        </nav>
-    <?php endif; ?>
+                    <?php for ($i = 1; $i <= $totalPages; $i++): ?>
+                        <li class="page-item <?php echo $page === $i ? 'active' : ''; ?>">
+                            <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"><?php echo $i; ?></a>
+                        </li>
+                    <?php endfor; ?>
+                    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : ''; ?>">
+                        <a class="page-link" href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>">Next</a>
+                    </li>
+                </ul>
+            </nav>
+        <?php endif; ?>
+    </div>
 </div>
 
 <!-- ==========================================
@@ -550,26 +557,34 @@ include("../layouts/header.php");
 <div class="modal fade" id="modal-bulk-assign" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
-            <form method="POST">
-                <input type="hidden" name="action" value="assign_customers">
+            <form id="form-bulk-assign" onsubmit="submitBulkAssign(event)">
+                <input type="hidden" name="action" value="assign_employee">
                 <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
                 <input type="hidden" name="target_type" id="assign-target-type" value="selected">
                 <div id="assign-ids-container"></div>
 
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-person-plus text-primary me-2"></i>Assign Customers</h5>
+                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-person-plus text-primary me-2"></i>Bulk Assign Customers</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" style="font-size:13px;">
                     <div class="mb-3">
+                        <label class="form-label fw-semibold text-secondary">Assignment Strategy</label>
+                        <select name="assignment_strategy" id="assign-strategy" class="form-select form-select-sm" onchange="toggleAssignStrategy(this.value)">
+                            <option value="manual">Manual (Choose employee below)</option>
+                            <option value="round_robin">Round Robin (Distribute equally)</option>
+                            <option value="least_loaded">Least Loaded Employee</option>
+                            <option value="random">Random Employee Routing</option>
+                        </select>
+                    </div>
+                    <div class="mb-3" id="wrapper-manual-assignee">
                         <label class="form-label fw-semibold text-secondary">Choose Employee Account</label>
-                        <select name="assignee_id" class="form-select form-select-sm" required>
+                        <select name="assignee_id" class="form-select form-select-sm">
                             <option value="">-- Unassign (Remove Owner) --</option>
                             <?php foreach ($employeesList as $emp): ?>
                                 <option value="<?php echo $emp['id']; ?>"><?php echo htmlspecialchars($emp['name']); ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <div class="form-text" style="font-size:11px;">Selecting an employee moves these customers to their "Pending Acceptance" inbox. Leaving it blank unassigns the records.</div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -695,29 +710,122 @@ include("../layouts/header.php");
     </div>
 </div>
 
+<!-- Bulk Tags Modal -->
+<div class="modal fade" id="modal-bulk-tags" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="form-bulk-tags" onsubmit="submitBulkTags(event)">
+                <input type="hidden" name="action" value="bulk_tags">
+                <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
+                <input type="hidden" name="target_type" id="tags-target-type" value="selected">
+                <input type="hidden" name="tag_action" id="tags-action-type" value="add">
+                <div id="tags-ids-container"></div>
+
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-tag-fill text-primary me-2"></i><span id="tags-modal-title">Bulk Add Tag</span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" style="font-size:13.5px;">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-secondary">Tag Label Name</label>
+                        <input type="text" name="tag_name" placeholder="e.g. VIP, lead" class="form-control form-control-sm" required>
+                        <div class="form-text mt-1 text-muted" style="font-size:11px;">Tags help filter segments instantly. Duplicates are auto-resolved.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Apply Tag</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Note Modal -->
+<div class="modal fade" id="modal-bulk-note" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="form-bulk-note" onsubmit="submitBulkNote(event)">
+                <input type="hidden" name="action" value="bulk_note">
+                <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
+                <input type="hidden" name="target_type" id="note-target-type" value="selected">
+                <div id="note-ids-container"></div>
+
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-journal-text text-primary me-2"></i>Attach Internal Note</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" style="font-size:13.5px;">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold text-secondary">Internal Note Content</label>
+                        <textarea name="note_text" rows="4" class="form-control form-control-sm" placeholder="Write note details to save to selected profiles..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary btn-sm">Attach Note</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- WhatsApp Broadcast Modal -->
 <div class="modal fade" id="modal-bulk-whatsapp" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <form method="POST">
+            <form id="form-bulk-whatsapp" onsubmit="submitBulkWhatsApp(event)">
                 <input type="hidden" name="action" value="send_whatsapp">
                 <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customers_crm'); ?>">
                 <input type="hidden" name="target_type" id="whatsapp-target-type" value="selected">
                 <div id="selected-ids-container"></div>
                 
                 <div class="modal-header">
-                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-whatsapp text-success me-2"></i>Send WhatsApp Broadcast</h5>
+                    <h5 class="modal-title fw-bold text-dark"><i class="bi bi-whatsapp text-success me-2"></i>Create WhatsApp Campaign Queue</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body" style="font-size:13.5px;">
-                    <div class="alert alert-light border p-3 mb-3 bg-light d-flex align-items-center gap-3">
-                        <i class="bi bi-info-circle text-primary fs-4"></i>
-                        <div>
-                            <div class="fw-bold">Estimated Dispatch Statistics:</div>
-                            <div class="text-secondary small">
-                                Selected Contacts: <strong id="wa-selected-display" class="text-dark">0</strong> | 
-                                Total Recipients: <strong id="wa-recipients-display" class="text-success">0</strong>
-                            </div>
+                    <!-- Pre-validation block -->
+                    <div id="wa-validation-block" class="alert alert-light border p-3 mb-3 bg-light">
+                        <div class="fw-bold mb-2 text-dark"><i class="bi bi-shield-check text-success me-1"></i> Campaign Pre-Validation Summary:</div>
+                        <div class="row g-2 text-secondary small" style="font-size:12px;">
+                            <div class="col-6">Total Selected Profiles: <strong id="wa-total-selected" class="text-dark">-</strong></div>
+                            <div class="col-6 text-success">Estimated Messages to Send: <strong id="wa-estimated-send" class="text-success">-</strong></div>
+                            <div class="col-6 text-danger">Invalid Mobile Formats (Skipped): <strong id="wa-invalid-count" class="text-danger">-</strong></div>
+                            <div class="col-6 text-warning">Duplicate Contacts (Skipped): <strong id="wa-duplicate-count" class="text-warning">-</strong></div>
+                            <div class="col-6 text-danger">Blacklisted / Opt-out (Skipped): <strong id="wa-blacklist-count" class="text-danger">-</strong></div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold text-secondary">Campaign Identity Name</label>
+                            <input type="text" name="campaign_name" placeholder="e.g. Summer Offer 2026" class="form-control form-control-sm" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold text-secondary">WhatsApp Sender Link Number</label>
+                            <select name="sender_id" class="form-select form-select-sm" required>
+                                <?php 
+                                // Query Linked WhatsApp integration numbers
+                                $wnStmt = $conn->prepare("
+                                    SELECT wn.* FROM whatsapp_numbers wn 
+                                    JOIN users u ON wn.user_id = u.id 
+                                    WHERE u.company_id = ?
+                                ");
+                                $wnStmt->bind_param("i", $companyId);
+                                $wnStmt->execute();
+                                $linkedNumbers = $wnStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                                $wnStmt->close();
+                                
+                                if (empty($linkedNumbers)) {
+                                    echo '<option value="">-- No linked WhatsApp numbers found --</option>';
+                                } else {
+                                    foreach ($linkedNumbers as $num) {
+                                        echo '<option value="' . $num['id'] . '">' . htmlspecialchars($num['display_phone_number'] ?: $num['phone_number_id']) . '</option>';
+                                    }
+                                }
+                                ?>
+                            </select>
                         </div>
                     </div>
 
@@ -747,7 +855,7 @@ include("../layouts/header.php");
                         </div>
                         <div class="mb-3">
                             <label class="form-label fw-semibold text-secondary">Message Content</label>
-                            <textarea name="message_text" id="wa-message-text" rows="5" class="form-control form-control-sm" placeholder="Write your broadcast message..."></textarea>
+                            <textarea name="message_text" id="wa-message-text" rows="4" class="form-control form-control-sm" placeholder="Write your broadcast message..."></textarea>
                         </div>
                     </div>
 
@@ -762,11 +870,16 @@ include("../layouts/header.php");
                                 <input type="text" name="template_language" id="wa-template-lang" value="en_US" placeholder="e.g. en_US" class="form-control form-control-sm">
                             </div>
                         </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold text-secondary">Template Variables (Body parameters, comma-separated)</label>
+                            <input type="text" name="variables" placeholder="e.g. Ahmad,porto,SAR" class="form-control form-control-sm">
+                            <div class="form-text mt-1 text-muted" style="font-size:11px;">Enter variables in matching sequence. E.g. Ahmad, Porto.</div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send-check"></i> Dispatch Broadcast</button>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-send-check"></i> Dispatch Broadcast Campaign</button>
                 </div>
             </form>
         </div>
@@ -779,6 +892,12 @@ let selectAllFiltered = false;
 const employeesMap = <?php echo json_encode($employeesMap); ?>;
 
 document.addEventListener('DOMContentLoaded', () => {
+    bindRowCheckboxes();
+    bindPagination();
+    applyCheckboxState();
+});
+
+function bindRowCheckboxes() {
     const checkAll = document.getElementById('check-all');
     const rowCheckboxes = document.querySelectorAll('.row-checkbox');
 
@@ -787,10 +906,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const checked = e.target.checked;
             rowCheckboxes.forEach(cb => {
                 cb.checked = checked;
+                const val = parseInt(cb.value);
                 if (checked) {
-                    selectedIds.add(parseInt(cb.value));
+                    selectedIds.add(val);
                 } else {
-                    selectedIds.delete(parseInt(cb.value));
+                    selectedIds.delete(val);
                 }
             });
             updateBulkBanner();
@@ -806,7 +926,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 selectedIds.delete(val);
             }
             if (checkAll) {
-                checkAll.checked = (selectedIds.size === rowCheckboxes.length);
+                checkAll.checked = Array.from(rowCheckboxes).every(el => el.checked);
             }
             updateBulkBanner();
         });
@@ -819,7 +939,70 @@ document.addEventListener('DOMContentLoaded', () => {
             updateBulkBanner();
         });
     }
-});
+}
+
+function bindPagination() {
+    document.querySelectorAll('.pagination-wrapper .page-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const url = new URL(link.href);
+            const page = url.searchParams.get('page') || 1;
+            goToPage(page);
+        });
+    });
+}
+
+function applyCheckboxState() {
+    const rowCheckboxes = document.querySelectorAll('.row-checkbox');
+    rowCheckboxes.forEach(cb => {
+        const val = parseInt(cb.value);
+        cb.checked = selectedIds.has(val) || selectAllFiltered;
+    });
+
+    const checkAll = document.getElementById('check-all');
+    if (checkAll && rowCheckboxes.length > 0) {
+        checkAll.checked = Array.from(rowCheckboxes).every(el => el.checked);
+    }
+}
+
+function goToPage(page) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('page', page);
+
+    // Show loading overlay
+    document.getElementById('table-loading-overlay').classList.remove('d-none');
+
+    fetch(url.toString())
+    .then(r => r.text())
+    .then(html => {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+
+        // Update Table contents
+        document.querySelector('#crm-table tbody').innerHTML = doc.querySelector('#crm-table tbody').innerHTML;
+        
+        // Update pagination wrapper
+        const oldPag = document.querySelector('.pagination-wrapper');
+        const newPag = doc.querySelector('.pagination-wrapper');
+        if (oldPag && newPag) {
+            oldPag.innerHTML = newPag.innerHTML;
+        }
+
+        // Re-bind actions
+        bindRowCheckboxes();
+        bindPagination();
+        applyCheckboxState();
+
+        // Push state in history URL
+        window.history.pushState(null, '', url.toString());
+
+        // Hide loading overlay
+        document.getElementById('table-loading-overlay').classList.add('d-none');
+    }).catch(() => {
+        document.getElementById('table-loading-overlay').classList.add('d-none');
+        alert("Failed to load page parameters.");
+    });
+}
 
 function updateBulkBanner() {
     const banner = document.getElementById('bulk-actions-banner');
@@ -851,16 +1034,58 @@ function updateBulkBanner() {
     }
 }
 
+function clearSelection() {
+    selectedIds.clear();
+    selectAllFiltered = false;
+    applyCheckboxState();
+    updateBulkBanner();
+}
+
+// ── FETCH CAMPAIGN VALIDATION & STATS SUMMARY ──
 function openBulkWhatsAppModal() {
+    // Generate pre-validation payload
+    const formParams = new URLSearchParams();
+    formParams.append('action', 'validate_campaign');
+    formParams.append('csrf_token', '<?php echo CsrfHelper::generateToken("customers_crm"); ?>');
+    formParams.append('target_type', selectAllFiltered ? 'filtered' : 'selected');
+
+    if (!selectAllFiltered) {
+        selectedIds.forEach(id => formParams.append('selected_ids[]', id));
+    }
+    
+    // Add current URL filters to payload in case of filtered target
+    const currentUrlParams = new URLSearchParams(window.location.search);
+    currentUrlParams.forEach((val, key) => formParams.append(key, val));
+
+    // Show loading statistics placeholders
+    document.getElementById('wa-total-selected').innerText = "...";
+    document.getElementById('wa-estimated-send').innerText = "...";
+    document.getElementById('wa-invalid-count').innerText = "...";
+    document.getElementById('wa-duplicate-count').innerText = "...";
+    document.getElementById('wa-blacklist-count').innerText = "...";
+
+    fetch('../api/crm_actions_handler.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formParams.toString()
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            const s = data.stats;
+            document.getElementById('wa-total-selected').innerText = s.total;
+            document.getElementById('wa-estimated-send').innerText = s.estimated;
+            document.getElementById('wa-invalid-count').innerText = s.invalid;
+            document.getElementById('wa-duplicate-count').innerText = s.duplicates;
+            document.getElementById('wa-blacklist-count').innerText = s.blacklist;
+        } else {
+            alert("Pre-validation failed: " + data.error);
+        }
+    });
+
     const container = document.getElementById('selected-ids-container');
     container.innerHTML = '';
-
-    const displayCount = selectAllFiltered ? <?php echo $totalCount; ?> : selectedIds.size;
-    document.getElementById('wa-selected-display').innerText = displayCount;
-    document.getElementById('wa-recipients-display').innerText = displayCount;
-
     document.getElementById('whatsapp-target-type').value = selectAllFiltered ? 'filtered' : 'selected';
-
     if (!selectAllFiltered) {
         selectedIds.forEach(id => {
             const input = document.createElement('input');
@@ -875,24 +1100,49 @@ function openBulkWhatsAppModal() {
     modal.show();
 }
 
-function openBulkAssignModal() {
-    const container = document.getElementById('assign-ids-container');
-    container.innerHTML = '';
+function submitBulkWhatsApp(ev) {
+    ev.preventDefault();
+    if (!confirm("Are you sure you want to schedule and dispatch this Campaign?")) return;
 
-    document.getElementById('assign-target-type').value = selectAllFiltered ? 'filtered' : 'selected';
-
-    if (!selectAllFiltered) {
-        selectedIds.forEach(id => {
-            const input = document.createElement('input');
-            input.type = 'hidden';
-            input.name = 'selected_ids[]';
-            input.value = id;
-            container.appendChild(input);
-        });
+    const form = document.getElementById('form-bulk-whatsapp');
+    const data = new FormData(form);
+    
+    // Append URL filters if target type is filtered
+    if (document.getElementById('whatsapp-target-type').value === 'filtered') {
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        currentUrlParams.forEach((val, key) => data.append(key, val));
     }
 
-    const modal = new bootstrap.Modal(document.getElementById('modal-bulk-assign'));
-    modal.show();
+    fetch('../api/crm_actions_handler.php', {
+        method: 'POST',
+        body: data
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            bootstrap.Modal.getInstance(document.getElementById('modal-bulk-whatsapp')).hide();
+            clearSelection();
+            
+            // Trigger dynamic toast
+            const container = document.getElementById('globalToastContainer');
+            if (container) {
+                const toastId = 'toast-' + Date.now();
+                container.insertAdjacentHTML('beforeend', `
+                    <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                        <div class="toast-header bg-success text-white">
+                            <i class="bi bi-check-circle me-2"></i>
+                            <strong class="me-auto">Campaign Queued</strong>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+                        </div>
+                        <div class="toast-body">✅ Campaign successfully queued! Broadcast worker has been launched.</div>
+                    </div>
+                `);
+                new bootstrap.Toast(document.getElementById(toastId)).show();
+            }
+        } else {
+            alert("Dispatch failed: " + res.error);
+        }
+    });
 }
 
 function toggleWhatsAppSendType(type) {
@@ -916,18 +1166,207 @@ function insertQuickReplyText(text) {
     document.getElementById('wa-message-text').value = text;
 }
 
-function triggerExcelExport() {
-    if (selectAllFiltered) {
-        exportFullFiltered();
-    } else {
-        const ids = Array.from(selectedIds).join(',');
-        window.location.href = '../api/export_customers.php?ids=' + ids;
+// ── BULK ROUTING & OWNER ASSIGNMENT ──
+function openBulkAssignModal() {
+    const container = document.getElementById('assign-ids-container');
+    container.innerHTML = '';
+    document.getElementById('assign-target-type').value = selectAllFiltered ? 'filtered' : 'selected';
+    if (!selectAllFiltered) {
+        selectedIds.forEach(id => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selected_ids[]';
+            input.value = id;
+            container.appendChild(input);
+        });
     }
+
+    const modal = new bootstrap.Modal(document.getElementById('modal-bulk-assign'));
+    modal.show();
+}
+
+function toggleAssignStrategy(val) {
+    const wrapper = document.getElementById('wrapper-manual-assignee');
+    if (val === 'manual') {
+        wrapper.classList.remove('d-none');
+    } else {
+        wrapper.classList.add('d-none');
+    }
+}
+
+function submitBulkAssign(ev) {
+    ev.preventDefault();
+    const form = document.getElementById('form-bulk-assign');
+    const data = new FormData(form);
+
+    if (document.getElementById('assign-target-type').value === 'filtered') {
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        currentUrlParams.forEach((val, key) => data.append(key, val));
+    }
+
+    fetch('../api/crm_actions_handler.php', {
+        method: 'POST',
+        body: data
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            bootstrap.Modal.getInstance(document.getElementById('modal-bulk-assign')).hide();
+            clearSelection();
+            goToPage(1);
+            alert("Customer routing assignments updated.");
+        } else {
+            alert(res.error);
+        }
+    });
+}
+
+// ── BULK TAGS ──
+function openBulkTagsModal(tagAction) {
+    document.getElementById('tags-action-type').value = tagAction;
+    document.getElementById('tags-modal-title').innerText = tagAction === 'add' ? 'Bulk Add Tag' : 'Bulk Remove Tag';
+    
+    const container = document.getElementById('tags-ids-container');
+    container.innerHTML = '';
+    document.getElementById('tags-target-type').value = selectAllFiltered ? 'filtered' : 'selected';
+    if (!selectAllFiltered) {
+        selectedIds.forEach(id => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selected_ids[]';
+            input.value = id;
+            container.appendChild(input);
+        });
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('modal-bulk-tags'));
+    modal.show();
+}
+
+function submitBulkTags(ev) {
+    ev.preventDefault();
+    const form = document.getElementById('form-bulk-tags');
+    const data = new FormData(form);
+
+    if (document.getElementById('tags-target-type').value === 'filtered') {
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        currentUrlParams.forEach((val, key) => data.append(key, val));
+    }
+
+    fetch('../api/crm_actions_handler.php', {
+        method: 'POST',
+        body: data
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            bootstrap.Modal.getInstance(document.getElementById('modal-bulk-tags')).hide();
+            clearSelection();
+            goToPage(1);
+            alert(res.message);
+        } else {
+            alert(res.error);
+        }
+    });
+}
+
+// ── BULK INTERNAL NOTE ──
+function openBulkNoteModal() {
+    const container = document.getElementById('note-ids-container');
+    container.innerHTML = '';
+    document.getElementById('note-target-type').value = selectAllFiltered ? 'filtered' : 'selected';
+    if (!selectAllFiltered) {
+        selectedIds.forEach(id => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'selected_ids[]';
+            input.value = id;
+            container.appendChild(input);
+        });
+    }
+
+    const modal = new bootstrap.Modal(document.getElementById('modal-bulk-note'));
+    modal.show();
+}
+
+function submitBulkNote(ev) {
+    ev.preventDefault();
+    const form = document.getElementById('form-bulk-note');
+    const data = new FormData(form);
+
+    if (document.getElementById('note-target-type').value === 'filtered') {
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        currentUrlParams.forEach((val, key) => data.append(key, val));
+    }
+
+    fetch('../api/crm_actions_handler.php', {
+        method: 'POST',
+        body: data
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            bootstrap.Modal.getInstance(document.getElementById('modal-bulk-note')).hide();
+            clearSelection();
+            alert("Internal note saved to selected customer profiles.");
+        } else {
+            alert(res.error);
+        }
+    });
+}
+
+// ── BULK DELETE ──
+function triggerBulkDelete() {
+    if (!confirm("Are you sure you want to permanently delete these customer profiles? This action is irreversible.")) return;
+
+    const data = new FormData();
+    data.append('action', 'delete_selected');
+    data.append('csrf_token', '<?php echo CsrfHelper::generateToken("customers_crm"); ?>');
+    data.append('target_type', selectAllFiltered ? 'filtered' : 'selected');
+
+    if (!selectAllFiltered) {
+        selectedIds.forEach(id => data.append('selected_ids[]', id));
+    } else {
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        currentUrlParams.forEach((val, key) => data.append(key, val));
+    }
+
+    fetch('../api/crm_actions_handler.php', {
+        method: 'POST',
+        body: data
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            clearSelection();
+            goToPage(1);
+            alert("Customer profiles deleted successfully.");
+        } else {
+            alert("Deletion failed: " + res.error);
+        }
+    });
+}
+
+function triggerExcelExport() {
+    const params = new URLSearchParams();
+    params.append('action', 'export');
+    params.append('target_type', selectAllFiltered ? 'filtered' : 'selected');
+
+    if (!selectAllFiltered) {
+        params.append('selected_ids', Array.from(selectedIds).join(','));
+    } else {
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        currentUrlParams.forEach((val, key) => params.append(key, val));
+    }
+
+    window.location.href = '../api/crm_actions_handler.php?' + params.toString();
 }
 
 function exportFullFiltered() {
     const params = new URLSearchParams(window.location.search);
-    window.location.href = '../api/export_customers.php?' + params.toString();
+    params.append('action', 'export');
+    params.append('target_type', 'filtered');
+    window.location.href = '../api/crm_actions_handler.php?' + params.toString();
 }
 
 function viewCustomerDetails(cust) {

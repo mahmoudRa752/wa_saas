@@ -78,8 +78,26 @@ foreach ($result as $campaign) {
         if (empty($recipient)) continue;
         
         if (!empty($templateName)) {
-            $res = $whatsAppService->sendTemplate($phoneNumberId, $recipient, $accessToken, $templateName, $templateLanguage);
-            $logMessageText = "[Template: $templateName ($templateLanguage)] " . $messageText;
+            $components = [];
+            $variablesText = $campaign['template_variables'] ?? '';
+            if (!empty($variablesText)) {
+                $params = array_map('trim', explode(',', $variablesText));
+                $parameterArray = [];
+                foreach ($params as $p) {
+                    $parameterArray[] = [
+                        'type' => 'text',
+                        'text' => $p
+                    ];
+                }
+                $components = [
+                    [
+                        'type' => 'body',
+                        'parameters' => $parameterArray
+                    ]
+                ];
+            }
+            $res = $whatsAppService->sendTemplate($phoneNumberId, $recipient, $accessToken, $templateName, $templateLanguage, $components);
+            $logMessageText = "[Template: $templateName ($templateLanguage)] [Vars: $variablesText] " . $messageText;
         } else {
             $res = $whatsAppService->sendText($phoneNumberId, $recipient, $messageText, $accessToken);
             $logMessageText = $messageText;

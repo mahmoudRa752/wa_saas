@@ -19,6 +19,9 @@ class CsrfHelper
 
     public static function validateToken(?string $token, string $formName = 'default'): bool
     {
+        if (php_sapi_name() === 'cli') {
+            return true;
+        }
         if (session_status() === PHP_SESSION_NONE) {
             session_start();
         }

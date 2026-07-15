@@ -84,7 +84,7 @@ class WhatsAppService
         return $this->sendPayload($phoneNumberId, $payload, $accessToken);
     }
 
-    public function sendTemplate(string $phoneNumberId, string $recipient, ?string $accessToken = null, string $templateName = 'hello_world', string $languageCode = 'en_US'): array
+    public function sendTemplate(string $phoneNumberId, string $recipient, ?string $accessToken = null, string $templateName = 'hello_world', string $languageCode = 'en_US', array $components = []): array
     {
         $payload = [
             'messaging_product' => 'whatsapp',
@@ -95,6 +95,10 @@ class WhatsAppService
                 'language' => ['code' => $languageCode],
             ],
         ];
+
+        if (!empty($components)) {
+            $payload['template']['components'] = $components;
+        }
 
         return $this->sendPayload($phoneNumberId, $payload, $accessToken);
     }
