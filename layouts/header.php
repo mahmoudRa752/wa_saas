@@ -63,6 +63,8 @@ $titles = [
         'chat.php'             => 'Live Chat',
         'customers.php'        => 'Customer Manager',
         'customer_inbox.php'   => 'Customer Inbox',
+        'deals.php'            => 'Sales Pipeline',
+        'deal_reports.php'     => 'Deals Analytics',
         'search.php'           => 'Advanced Search',
         'internal_chat.php'    => 'Internal Chat',
         'employees.php'        => 'Employees',
@@ -283,6 +285,12 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
             </a>
             <a href="/wa_saas/dashboard/customers.php" class="nav-link <?php echo $currentPage === 'customers.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-person-lines-fill"></i></span> Customer Manager
+            </a>
+            <a href="/wa_saas/dashboard/deals.php" class="nav-link <?php echo $currentPage === 'deals.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-kanban"></i></span> Sales Pipeline
+            </a>
+            <a href="/wa_saas/dashboard/deal_reports.php" class="nav-link <?php echo $currentPage === 'deal_reports.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-graph-up-arrow"></i></span> Deals Analytics
             </a>
             <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'employee'): ?>
                 <a href="/wa_saas/dashboard/customer_inbox.php" class="nav-link <?php echo $currentPage === 'customer_inbox.php' ? 'active' : ''; ?>">

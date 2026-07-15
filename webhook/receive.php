@@ -95,6 +95,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $convService->touch($convId);
                 $conn->query("UPDATE conversations SET last_incoming_at = NOW(), sla_status = 'warning' WHERE id = " . (int)$convId);
 
+                // Log WhatsApp incoming message activity in active Deal timeline
+                require_once(__DIR__ . '/../core/Deal/DealRepository.php');
+                require_once(__DIR__ . '/../core/Deal/DealService.php');
+                $dealRepo = new \Core\Deal\DealRepository($conn);
+                $dealService = new \Core\Deal\DealService($dealRepo, $customerRepo);
+                $dealService->logWhatsAppActivity($companyId, $fromNumber, 'in', $msgBody);
+
                 // ── Automation Rules Trigger ──
                 $rulesStmt = $conn->prepare("SELECT * FROM automation_rules WHERE company_id = ? AND is_active = 1");
                 $rulesStmt->bind_param("i", $companyId);

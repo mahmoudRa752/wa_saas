@@ -66,6 +66,23 @@ if ($role === 'admin') {
     $myActiveCustomers = $resActive ? (int)($resActive->fetch_row()[0] ?? 0) : 0;
 }
 
+// ── DEALS CRM KANBAN & REMINDERS ──
+require_once(__DIR__ . '/../core/Deal/DealRepository.php');
+$dealRepo = new \Core\Deal\DealRepository($conn);
+
+if ($role === 'admin') {
+    $dealKPIs = $dealRepo->getAdminKPIs($ctx);
+} else {
+    $dealKPIs = $dealRepo->getEmployeeKPIs($ctx, $userId);
+}
+
+$todayFollowups = $dealRepo->getReminders($ctx, $userId, 'today', $role);
+$overdueFollowups = $dealRepo->getReminders($ctx, $userId, 'overdue', $role);
+$tomorrowFollowups = $dealRepo->getReminders($ctx, $userId, 'tomorrow', $role);
+
+$totalReminders = count($todayFollowups) + count($overdueFollowups);
+
+
 // ── NEW ADVANCED ANALYTICS QUERIES ──
 
 // 1. Conversation status counts
@@ -241,6 +258,86 @@ include("../layouts/header.php");
     <?php endif; ?>
 </div>
 
+<!-- Sales Pipeline Performance (Deals CRM) -->
+<h6 class="fw-bold mb-3 mt-4 text-dark"><i class="bi bi-funnel me-2 text-primary"></i>Sales Pipeline Performance (Deals CRM)</h6>
+<div class="row g-3 mb-4">
+    <?php if ($role === 'admin'): ?>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-purple fade-in">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-currency-dollar"></i></div>
+                <div class="kpi-value" style="font-size: 15px;"><?php echo number_format($dealKPIs['pipeline_value'], 2); ?> SAR</div>
+                <div class="kpi-label">Pipeline Value</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.05s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-trophy-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['won_deals']; ?></div>
+                <div class="kpi-label">Won Deals</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.1s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-hand-thumbs-down-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['lost_deals']; ?></div>
+                <div class="kpi-label">Lost Deals</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-blue fade-in" style="animation-delay:.15s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-percent"></i></div>
+                <div class="kpi-value"><?php echo number_format($dealKPIs['conversion_rate'], 1); ?>%</div>
+                <div class="kpi-label">Conversion Rate</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-purple fade-in" style="animation-delay:.2s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-tag-fill"></i></div>
+                <div class="kpi-value" style="font-size: 13px;"><?php echo number_format($dealKPIs['average_deal_size'], 2); ?> SAR</div>
+                <div class="kpi-label">Avg Deal Size</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-blue fade-in" style="animation-delay:.25s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-calendar-check-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['closing_this_month']; ?></div>
+                <div class="kpi-label">Closing This Month</div>
+            </div>
+        </div>
+    <?php else: ?>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-blue fade-in">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-briefcase-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['my_deals']; ?></div>
+                <div class="kpi-label">My Deals</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.05s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-bell-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['todays_followups']; ?></div>
+                <div class="kpi-label">Today's Follow-ups</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.1s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-currency-dollar"></i></div>
+                <div class="kpi-value" style="font-size: 15px;"><?php echo number_format($dealKPIs['won_this_month'], 2); ?> SAR</div>
+                <div class="kpi-label">Won This Month</div>
+            </div>
+        </div>
+    <?php endif; ?>
+</div>
+
 <!-- Charts Row -->
 <div class="row g-3 mb-4">
     <!-- Chart 1: Messages History -->
@@ -371,9 +468,94 @@ include("../layouts/header.php");
     </div>
 </div>
 
+<!-- CRM Follow-up Reminders Checklist -->
+<div class="row g-3 mt-4 mb-4">
+    <div class="col-12">
+        <div class="card p-4 shadow-sm border-0">
+            <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-alarm-fill text-warning me-2"></i>CRM Follow-up Reminders</h6>
+            
+            <div class="nav nav-tabs mb-3" id="reminders-tab" role="tablist">
+                <button class="nav-link active fw-bold text-dark btn-sm" id="tab-today-btn" data-bs-toggle="tab" data-bs-target="#tab-today" type="button" role="tab">Today's Reminders (<?php echo count($todayFollowups); ?>)</button>
+                <button class="nav-link fw-bold text-danger btn-sm" id="tab-overdue-btn" data-bs-toggle="tab" data-bs-target="#tab-overdue" type="button" role="tab">Overdue (<?php echo count($overdueFollowups); ?>)</button>
+                <button class="nav-link fw-bold text-secondary btn-sm" id="tab-tomorrow-btn" data-bs-toggle="tab" data-bs-target="#tab-tomorrow" type="button" role="tab">Tomorrow's Reminders (<?php echo count($tomorrowFollowups); ?>)</button>
+            </div>
+            
+            <div class="tab-content" id="reminders-tabContent" style="font-size:13px;">
+                <!-- Today's Reminders -->
+                <div class="tab-pane fade show active" id="tab-today" role="tabpanel">
+                    <?php if (empty($todayFollowups)): ?>
+                        <div class="text-muted py-2"><i class="bi bi-check-circle me-1 text-success"></i> No follow-ups scheduled for today.</div>
+                    <?php else: ?>
+                        <div class="list-group list-group-flush">
+                            <?php foreach ($todayFollowups as $rem): ?>
+                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <span class="badge bg-warning text-dark me-2">[<?php echo strtoupper($rem['type']); ?>]</span>
+                                        <strong><?php echo htmlspecialchars($rem['full_name_ar'] ?: $rem['full_name_en'] ?: $rem['mobile']); ?></strong> - <?php echo htmlspecialchars($rem['notes']); ?>
+                                    </div>
+                                    <span class="text-secondary small"><?php echo $rem['followup_time']; ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <!-- Overdue Reminders -->
+                <div class="tab-pane fade" id="tab-overdue" role="tabpanel">
+                    <?php if (empty($overdueFollowups)): ?>
+                        <div class="text-muted py-2"><i class="bi bi-check-circle me-1 text-success"></i> No overdue reminders.</div>
+                    <?php else: ?>
+                        <div class="list-group list-group-flush">
+                            <?php foreach ($overdueFollowups as $rem): ?>
+                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <span class="badge bg-danger me-2">[<?php echo strtoupper($rem['type']); ?>]</span>
+                                        <strong><?php echo htmlspecialchars($rem['full_name_ar'] ?: $rem['full_name_en'] ?: $rem['mobile']); ?></strong> - <?php echo htmlspecialchars($rem['notes']); ?>
+                                    </div>
+                                    <span class="text-danger fw-bold small"><?php echo $rem['followup_date']; ?> <?php echo $rem['followup_time']; ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <!-- Tomorrow's Reminders -->
+                <div class="tab-pane fade" id="tab-tomorrow" role="tabpanel">
+                    <?php if (empty($tomorrowFollowups)): ?>
+                        <div class="text-muted py-2"><i class="bi bi-calendar me-1"></i> No follow-ups scheduled for tomorrow.</div>
+                    <?php else: ?>
+                        <div class="list-group list-group-flush">
+                            <?php foreach ($tomorrowFollowups as $rem): ?>
+                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <span class="badge bg-secondary me-2">[<?php echo strtoupper($rem['type']); ?>]</span>
+                                        <strong><?php echo htmlspecialchars($rem['full_name_ar'] ?: $rem['full_name_en'] ?: $rem['mobile']); ?></strong> - <?php echo htmlspecialchars($rem['notes']); ?>
+                                    </div>
+                                    <span class="text-secondary small"><?php echo $rem['followup_time']; ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 document.addEventListener("DOMContentLoaded", function() {
+    // Reminders notification popup alert
+    const todayCount = <?php echo count($todayFollowups); ?>;
+    const overdueCount = <?php echo count($overdueFollowups); ?>;
+    if (todayCount > 0 || overdueCount > 0) {
+        let msg = "⏰ CRM Reminders Alert:\n";
+        if (overdueCount > 0) msg += `• You have ${overdueCount} OVERDUE follow-ups!\n`;
+        if (todayCount > 0) msg += `• You have ${todayCount} follow-ups scheduled for today.\n`;
+        msg += "\nPlease check the Follow-up Reminders panel.";
+        alert(msg);
+    }
+
     // 1. Messages History Chart (Line Chart)
     const ctxHistory = document.getElementById('messagesHistoryChart').getContext('2d');
     new Chart(ctxHistory, {

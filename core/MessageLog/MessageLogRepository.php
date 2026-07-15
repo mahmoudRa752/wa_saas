@@ -15,6 +15,31 @@ class MessageLogRepository
         $stmt->bind_param("iss", $userId, $recipient, $message);
         $result = $stmt->execute();
         $stmt->close();
+
+        // Log outgoing WhatsApp message in active CRM Deal timeline
+        $companyId = 0;
+        $userStmt = $this->conn->prepare("SELECT company_id FROM users WHERE id = ? LIMIT 1");
+        if ($userStmt) {
+            $userStmt->bind_param("i", $userId);
+            $userStmt->execute();
+            $userRow = $userStmt->get_result()->fetch_assoc();
+            $companyId = $userRow ? (int)$userRow['company_id'] : 0;
+            $userStmt->close();
+        }
+        if ($companyId > 0) {
+            require_once(__DIR__ . '/../TenantContext.php');
+            require_once(__DIR__ . '/../Customer/Customer.php');
+            require_once(__DIR__ . '/../Customer/CustomerRepository.php');
+            require_once(__DIR__ . '/../Deal/Deal.php');
+            require_once(__DIR__ . '/../Deal/DealRepository.php');
+            require_once(__DIR__ . '/../Deal/DealService.php');
+            
+            $custRepo = new \Core\Customer\CustomerRepository($this->conn);
+            $dealRepo = new \Core\Deal\DealRepository($this->conn);
+            $dealService = new \Core\Deal\DealService($dealRepo, $custRepo);
+            $dealService->logWhatsAppActivity($companyId, $recipient, 'out', $message);
+        }
+
         return $result;
     }
 

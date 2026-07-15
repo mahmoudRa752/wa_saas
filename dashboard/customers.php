@@ -936,9 +936,42 @@ function viewCustomerDetails(cust) {
             <tr><th class="bg-light">Created Date</th><td>${cust.created_at || '-'}</td></tr>
             <tr><th class="bg-light">Last Updated</th><td>${cust.updated_at || '-'}</td></tr>
         </table>
+
+        <div id="customer-deal-details-wrapper" class="mt-3 border p-3 rounded bg-white">
+            <h6 class="fw-bold mb-2 text-primary"><i class="bi bi-piggy-bank me-1"></i> CRM Sales Deal</h6>
+            <div class="text-center py-2 text-muted">Loading CRM Sales Deal parameters...</div>
+        </div>
     `;
     const modal = new bootstrap.Modal(document.getElementById('modal-view-customer'));
     modal.show();
+
+    // Fetch deal info
+    fetch('../api/deals_handler.php?action=get_customer_deal&customer_id=' + cust.id)
+    .then(r => r.json())
+    .then(data => {
+        const wrapper = document.getElementById('customer-deal-details-wrapper');
+        if (data.success && data.deal) {
+            const d = data.deal;
+            wrapper.innerHTML = `
+                <h6 class="fw-bold mb-2 text-primary"><i class="bi bi-piggy-bank me-1"></i> CRM Sales Deal</h6>
+                <table class="table table-sm table-bordered m-0" style="font-size:12px;">
+                    <tr><th class="bg-light" width="150">Pipeline Stage</th><td><span class="badge bg-primary">${d.stage_name}</span></td></tr>
+                    <tr><th class="bg-light">Deal Value</th><td class="text-success fw-bold">${parseFloat(d.estimated_value).toFixed(2)} ${d.currency}</td></tr>
+                    <tr><th class="bg-light">Expected Close Date</th><td>${d.expected_close_date || '-'}</td></tr>
+                    <tr><th class="bg-light">Last Activity</th><td>${d.last_activity || '-'}</td></tr>
+                    <tr><th class="bg-light">Next Follow-up</th><td><span class="text-warning fw-bold">${d.next_followup || '-'}</span></td></tr>
+                </table>
+            `;
+        } else {
+            wrapper.innerHTML = `
+                <h6 class="fw-bold mb-2 text-primary"><i class="bi bi-piggy-bank me-1"></i> CRM Sales Deal</h6>
+                <div class="text-muted small"><i class="bi bi-info-circle me-1"></i> No active CRM sales pipeline deal exists for this customer.</div>
+            `;
+        }
+    }).catch(() => {
+        const wrapper = document.getElementById('customer-deal-details-wrapper');
+        if (wrapper) wrapper.innerHTML = '<div class="text-danger small">Failed to load CRM deal info.</div>';
+    });
 }
 
 function openEditCustomerModal(cust) {
