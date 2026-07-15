@@ -131,7 +131,46 @@ function checkNotifications() {
         }).catch(() => {});
 }
 
+function showRoutingNotificationToast(notif) {
+    const container = document.getElementById('globalToastContainer');
+    if (!container) return;
+    
+    const toastId = 'toast-notif-' + notif.id;
+    const toastHtml = `
+        <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header" style="background:#0f172a; color:#fff;">
+                <i class="bi bi-person-badge me-2 text-primary"></i>
+                <strong class="me-auto">CRM Customer Routing</strong>
+                <small class="text-white-50">Just now</small>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body">
+                <p class="mb-2" style="font-size:13.5px;color:#1e293b;">${escapeHtml(notif.message)}</p>
+                <a href="/wa_saas/dashboard/customer_inbox.php" class="btn btn-primary btn-sm px-3" style="font-size:11px;background:#0d6efd;border:none;">Open Inbox</a>
+            </div>
+        </div>
+    `;
+    container.insertAdjacentHTML('beforeend', toastHtml);
+    const toastEl = document.getElementById(toastId);
+    const bsToast = new bootstrap.Toast(toastEl, { delay: 10000 });
+    bsToast.show();
+}
+
+function checkRoutingNotifications() {
+    fetch('/wa_saas/api/get_new_notifications.php')
+        .then(r => r.json())
+        .then(data => {
+            if (data.notifications && data.notifications.length > 0) {
+                data.notifications.forEach(notif => {
+                    playBeepSound();
+                    showRoutingNotificationToast(notif);
+                });
+            }
+        }).catch(() => {});
+}
+
 setInterval(checkNotifications, 5000);
+setInterval(checkRoutingNotifications, 5000);
 </script>
 <?php endif; ?>
 </body>

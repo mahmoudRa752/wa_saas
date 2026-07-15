@@ -68,6 +68,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($companyId) {
 
+                // Automatic Customer Routing & Creation
+                require_once(__DIR__ . '/../core/Customer/Customer.php');
+                require_once(__DIR__ . '/../core/Customer/CustomerRepository.php');
+                require_once(__DIR__ . '/../core/Customer/CustomerService.php');
+                require_once(__DIR__ . '/../core/TenantContext.php');
+                $customerRepo = new \Core\Customer\CustomerRepository($conn);
+                $customerService = new \Core\Customer\CustomerService($customerRepo);
+                $customerService->routeIncomingCustomer($companyId, $fromNumber);
+
                 // Resolve conversation via ConversationService (find or create)
                 $convService = new ConversationService(new ConversationRepository($conn));
                 $convId      = $convService->findOrCreate($companyId, $fromNumber);

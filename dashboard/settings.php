@@ -102,6 +102,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
     }
 }
 
+// ── 4. Handle Customer Routing Settings Update POST ──
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['action'] === 'update_routing') {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'customer_routing')) {
+        die("Invalid CSRF Token.");
+    }
+    
+    if ($role !== 'admin') {
+        die("Unauthorized");
+    }
+    
+    $mode = trim($_POST['auto_assignment_mode'] ?? 'manual');
+    $conn->query("UPDATE companies SET auto_assignment_mode = '" . $conn->real_escape_string($mode) . "' WHERE id = $companyId");
+    
+    require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+    $audit = new \Core\Services\AuditLogService($conn);
+    $audit->log($companyId, $userId, 'update_customer_routing', "Updated automatic customer routing strategy: Mode = $mode");
+    
+    $success = "✅ Customer routing strategy settings updated successfully!";
+    $company = $companyRepo->getById($companyId);
+}
+
 // Fetch currently linked WhatsApp numbers
 $linkedNumbers = [];
 $stmt = $conn->prepare("
@@ -135,6 +157,7 @@ include("../layouts/header.php");
                 <button class="nav-link text-start fw-semibold" id="tab-whatsapp-btn" data-bs-toggle="pill" data-bs-target="#tab-whatsapp" type="button" role="tab"><i class="bi bi-phone me-2"></i>WhatsApp Integration</button>
                 <button class="nav-link text-start fw-semibold" id="tab-notifications-btn" data-bs-toggle="pill" data-bs-target="#tab-notifications" type="button" role="tab"><i class="bi bi-bell me-2"></i>Notifications</button>
                 <button class="nav-link text-start fw-semibold" id="tab-roles-btn" data-bs-toggle="pill" data-bs-target="#tab-roles" type="button" role="tab"><i class="bi bi-shield-lock me-2"></i>Roles & Permissions</button>
+                <button class="nav-link text-start fw-semibold" id="tab-routing-btn" data-bs-toggle="pill" data-bs-target="#tab-routing" type="button" role="tab"><i class="bi bi-shuffle me-2"></i>Customer Routing</button>
             </div>
         </div>
     </div>
@@ -276,6 +299,31 @@ include("../layouts/header.php");
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- 5. Customer Routing Tab -->
+                <div class="tab-pane fade" id="tab-routing" role="tabpanel">
+                    <h5 class="fw-bold text-dark mb-4">Automatic Customer Routing Settings</h5>
+                    <p class="text-secondary small mb-4">Define how new incoming WhatsApp chats from unknown contacts are routed to employee agents.</p>
+                    
+                    <form method="POST" action="">
+                        <input type="hidden" name="action" value="update_routing">
+                        <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('customer_routing'); ?>">
+                        
+                        <div class="mb-4">
+                            <label class="form-label text-secondary fw-semibold mb-1" style="font-size:12.5px;">Auto Assignment Strategy Mode</label>
+                            <select name="auto_assignment_mode" class="form-select form-select-sm" required <?php echo $role !== 'admin' ? 'disabled' : ''; ?>>
+                                <option value="manual" <?php echo ($company['auto_assignment_mode'] ?? 'manual') === 'manual' ? 'selected' : ''; ?>>Manual Assignment Queue</option>
+                                <option value="round_robin" <?php echo ($company['auto_assignment_mode'] ?? 'manual') === 'round_robin' ? 'selected' : ''; ?>>Round Robin (Equally distribute new contacts)</option>
+                                <option value="least_loaded" <?php echo ($company['auto_assignment_mode'] ?? 'manual') === 'least_loaded' ? 'selected' : ''; ?>>Least Loaded Employee (Assign to lowest count agent)</option>
+                                <option value="random" <?php echo ($company['auto_assignment_mode'] ?? 'manual') === 'random' ? 'selected' : ''; ?>>Random Employee (Select any active employee)</option>
+                            </select>
+                        </div>
+                        
+                        <?php if ($role === 'admin'): ?>
+                            <button type="submit" class="btn btn-primary btn-sm py-2 px-4 fw-semibold"><i class="bi bi-save me-1"></i> Save Routing Settings</button>
+                        <?php endif; ?>
+                    </form>
                 </div>
 
             </div>

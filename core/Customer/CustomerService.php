@@ -151,6 +151,10 @@ class CustomerService
         $audit = new \Core\Services\AuditLogService($this->repository->getDbConnection());
         $audit->log($ctx->companyId, $assignedBy, $action, $description);
 
+        if ($assignedTo) {
+            $this->createNotification($ctx->companyId, $assignedTo, 'assignment_pending', "You have a new customer assignment: $count contacts. Please Accept or Reject.");
+        }
+
         return true;
     }
 
@@ -167,7 +171,20 @@ class CustomerService
      */
     public function rejectAssignments(TenantContext $ctx, int $employeeId, array $customerIds): bool
     {
-        return $this->repository->updateAssignmentStatus($ctx, $employeeId, $customerIds, 'rejected');
+        $res = $this->repository->updateAssignmentStatus($ctx, $employeeId, $customerIds, 'rejected');
+        if ($res) {
+            $db = $this->repository->getDbConnection();
+            $adminRes = $db->query("SELECT id FROM users WHERE company_id = {$ctx->companyId} AND role = 'admin'");
+            if ($adminRes) {
+                $employeeName = $this->getEmployeeNameById($employeeId);
+                $count = count($customerIds);
+                while ($row = $adminRes->fetch_assoc()) {
+                    $adminId = (int)$row['id'];
+                    $this->createNotification($ctx->companyId, $adminId, 'assignment_rejected', "Employee '$employeeName' rejected $count customer assignments.");
+                }
+            }
+        }
+        return $res;
     }
 
     /**
@@ -387,5 +404,128 @@ class CustomerService
             }
         }
         return false;
+    }
+
+    /**
+     * Automatic Customer Routing on incoming WhatsApp messages
+     */
+    public function routeIncomingCustomer(int $companyId, string $mobile): ?int
+    {
+        $ctx = TenantContext::forCompany($companyId);
+        $existing = $this->repository->findByMobile($ctx, $mobile);
+        if ($existing) {
+            return $existing->id;
+        }
+
+        $db = $this->repository->getDbConnection();
+        $stmt = $db->prepare("SELECT auto_assignment_mode FROM companies WHERE id = ? LIMIT 1");
+        $mode = 'manual';
+        if ($stmt) {
+            $stmt->bind_param("i", $companyId);
+            $stmt->execute();
+            $row = $stmt->get_result()->fetch_assoc();
+            $mode = $row['auto_assignment_mode'] ?? 'manual';
+            $stmt->close();
+        }
+
+        $assignedTo = null;
+        $status = 'unassigned';
+
+        if ($mode !== 'manual') {
+            $empRes = $db->query("SELECT id FROM users WHERE company_id = $companyId AND role = 'employee' ORDER BY id ASC");
+            $employees = [];
+            while ($r = $empRes->fetch_assoc()) {
+                $employees[] = (int)$r['id'];
+            }
+
+            if (!empty($employees)) {
+                if ($mode === 'random') {
+                    $assignedTo = $employees[array_rand($employees)];
+                } elseif ($mode === 'least_loaded') {
+                    $loadRes = $db->query("
+                        SELECT u.id, COUNT(c.id) as load_count 
+                        FROM users u 
+                        LEFT JOIN customers c ON u.id = c.assigned_to AND c.assignment_status = 'accepted'
+                        WHERE u.company_id = $companyId AND u.role = 'employee'
+                        GROUP BY u.id
+                        ORDER BY load_count ASC, u.id ASC
+                        LIMIT 1
+                    ");
+                    if ($loadRes) {
+                        $assignedTo = (int)($loadRes->fetch_assoc()['id'] ?? $employees[0]);
+                    } else {
+                        $assignedTo = $employees[0];
+                    }
+                } elseif ($mode === 'round_robin') {
+                    $lastAssRes = $db->query("SELECT assigned_to FROM customers WHERE company_id = $companyId AND assigned_to IS NOT NULL ORDER BY assigned_at DESC LIMIT 1");
+                    $lastAssignedTo = $lastAssRes ? (int)($lastAssRes->fetch_row()[0] ?? 0) : 0;
+                    
+                    $assignedTo = $employees[0];
+                    if ($lastAssignedTo > 0) {
+                        $index = array_search($lastAssignedTo, $employees);
+                        if ($index !== false && isset($employees[$index + 1])) {
+                            $assignedTo = $employees[$index + 1];
+                        }
+                    }
+                }
+                
+                if ($assignedTo) {
+                    $status = 'pending';
+                }
+            }
+        }
+
+        $customer = new Customer(
+            id: null,
+            companyId: $companyId,
+            fullNameAr: 'New Lead',
+            fullNameEn: 'New Lead',
+            mobile: $mobile,
+            nationalId: null,
+            nationality: null,
+            gender: null,
+            projectName: null,
+            programName: null,
+            employer: null,
+            sourceFile: 'WhatsApp Inbound',
+            createdAt: null,
+            updatedAt: null,
+            assignedTo: $assignedTo,
+            assignedBy: null,
+            assignedAt: $assignedTo ? date('Y-m-d H:i:s') : null,
+            assignmentStatus: $status
+        );
+
+        $newId = $this->repository->create($customer);
+
+        $action = $assignedTo ? 'auto_route_customer' : 'inbound_lead_received';
+        $employeeName = $assignedTo ? $this->getEmployeeNameById($assignedTo) : 'None (Unassigned)';
+        $description = "Inbound contact $mobile received. Strategy '$mode' selected. Route destination: $employeeName.";
+        
+        $audit = new \Core\Services\AuditLogService($db);
+        $audit->log($companyId, null, $action, $description);
+
+        if ($assignedTo) {
+            $this->createNotification($companyId, $assignedTo, 'assignment_pending', "You have a new customer assigned automatically: $mobile. Please Accept or Reject.");
+        }
+
+        return $newId;
+    }
+
+    /**
+     * Helper to store custom routing notifications
+     */
+    private function createNotification(int $companyId, int $userId, string $type, string $message): void
+    {
+        $db = $this->repository->getDbConnection();
+        $stmt = $db->prepare("
+            INSERT INTO notifications (company_id, user_id, type, message) 
+            VALUES (?, ?, ?, ?)
+        ");
+        if ($stmt) {
+            $stmt->bind_param("iiss", $companyId, $userId, $type, $message);
+            $stmt->execute();
+            $stmt->close();
+        }
     }
 }

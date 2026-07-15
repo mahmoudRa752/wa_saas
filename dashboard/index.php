@@ -37,29 +37,33 @@ $role = $_SESSION['role'];
 $userId = (int)$_SESSION['user_id'];
 
 if ($role === 'admin') {
-    $resCust = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id");
-    $totalCustomers = $resCust ? (int)($resCust->fetch_row()[0] ?? 0) : 0;
+    // 1. New Leads (WhatsApp Inbound)
+    $resLeads = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND source_file = 'WhatsApp Inbound'");
+    $newLeads = $resLeads ? (int)($resLeads->fetch_row()[0] ?? 0) : 0;
 
-    $resAssigned = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to IS NOT NULL AND assignment_status = 'accepted'");
-    $assignedCustomers = $resAssigned ? (int)($resAssigned->fetch_row()[0] ?? 0) : 0;
+    // 2. Pending Assignment (Unassigned)
+    $resPendingAssign = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND (assigned_to IS NULL OR assignment_status = 'unassigned')");
+    $pendingAssignment = $resPendingAssign ? (int)($resPendingAssign->fetch_row()[0] ?? 0) : 0;
 
-    $resUnassigned = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND (assigned_to IS NULL OR assignment_status = 'unassigned')");
-    $unassignedCustomers = $resUnassigned ? (int)($resUnassigned->fetch_row()[0] ?? 0) : 0;
+    // 3. Assigned Today
+    $resAssToday = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to IS NOT NULL AND DATE(assigned_at) = CURRENT_DATE()");
+    $assignedToday = $resAssToday ? (int)($resAssToday->fetch_row()[0] ?? 0) : 0;
 
-    $resPending = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assignment_status = 'pending'");
-    $pendingCustomersCount = $resPending ? (int)($resPending->fetch_row()[0] ?? 0) : 0;
+    // 4. Waiting Acceptance (Pending)
+    $resWaitAcc = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assignment_status = 'pending'");
+    $waitingAcceptance = $resWaitAcc ? (int)($resWaitAcc->fetch_row()[0] ?? 0) : 0;
 } else {
-    $resMyCust = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'accepted'");
-    $myCustomers = $resMyCust ? (int)($resMyCust->fetch_row()[0] ?? 0) : 0;
+    // 1. Pending Acceptance
+    $resPendingAcc = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'pending'");
+    $pendingAcceptance = $resPendingAcc ? (int)($resPendingAcc->fetch_row()[0] ?? 0) : 0;
 
-    $resNewAss = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'pending'");
-    $newAssignments = $resNewAss ? (int)($resNewAss->fetch_row()[0] ?? 0) : 0;
+    // 2. Accepted Today
+    $resAccToday = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'accepted' AND DATE(assigned_at) = CURRENT_DATE()");
+    $acceptedToday = $resAccToday ? (int)($resAccToday->fetch_row()[0] ?? 0) : 0;
 
-    $resOpenConv = $conn->query("SELECT COUNT(*) FROM conversations WHERE company_id = $company_id AND user_id = $userId AND status = 'open'");
-    $openConversations = $resOpenConv ? (int)($resOpenConv->fetch_row()[0] ?? 0) : 0;
-
-    $resClosedConv = $conn->query("SELECT COUNT(*) FROM conversations WHERE company_id = $company_id AND user_id = $userId AND status = 'closed'");
-    $closedConversations = $resClosedConv ? (int)($resClosedConv->fetch_row()[0] ?? 0) : 0;
+    // 3. My Active Customers
+    $resActive = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'accepted'");
+    $myActiveCustomers = $resActive ? (int)($resActive->fetch_row()[0] ?? 0) : 0;
 }
 
 // ── NEW ADVANCED ANALYTICS QUERIES ──
@@ -179,67 +183,59 @@ include("../layouts/header.php");
             <div class="kpi-card kpi-purple fade-in">
                 <div class="kpi-bg"></div>
                 <div class="kpi-icon"><i class="bi bi-people-fill"></i></div>
-                <div class="kpi-value"><?php echo number_format($totalCustomers); ?></div>
-                <div class="kpi-label">Total CRM Customers</div>
+                <div class="kpi-value"><?php echo number_format($newLeads); ?></div>
+                <div class="kpi-label">New Leads</div>
             </div>
         </div>
         <div class="col-md-3 col-sm-6">
-            <div class="kpi-card kpi-green fade-in" style="animation-delay:.05s">
-                <div class="kpi-bg"></div>
-                <div class="kpi-icon"><i class="bi bi-person-check-fill"></i></div>
-                <div class="kpi-value"><?php echo number_format($assignedCustomers); ?></div>
-                <div class="kpi-label">Assigned Customers</div>
-            </div>
-        </div>
-        <div class="col-md-3 col-sm-6">
-            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.1s">
+            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.05s">
                 <div class="kpi-bg"></div>
                 <div class="kpi-icon"><i class="bi bi-person-dash-fill"></i></div>
-                <div class="kpi-value"><?php echo number_format($unassignedCustomers); ?></div>
-                <div class="kpi-label">Unassigned Customers</div>
+                <div class="kpi-value"><?php echo number_format($pendingAssignment); ?></div>
+                <div class="kpi-label">Pending Assignment</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.1s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-person-check-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($assignedToday); ?></div>
+                <div class="kpi-label">Assigned Today</div>
             </div>
         </div>
         <div class="col-md-3 col-sm-6">
             <div class="kpi-card kpi-blue fade-in" style="animation-delay:.15s">
                 <div class="kpi-bg"></div>
                 <div class="kpi-icon"><i class="bi bi-hourglass-split"></i></div>
-                <div class="kpi-value"><?php echo number_format($pendingCustomersCount); ?></div>
-                <div class="kpi-label">Pending Acceptance</div>
+                <div class="kpi-value"><?php echo number_format($waitingAcceptance); ?></div>
+                <div class="kpi-label">Waiting Acceptance</div>
             </div>
         </div>
     <?php else: ?>
-        <div class="col-md-3 col-sm-6">
-            <div class="kpi-card kpi-purple fade-in">
-                <div class="kpi-bg"></div>
-                <div class="kpi-icon"><i class="bi bi-people-fill"></i></div>
-                <div class="kpi-value"><?php echo number_format($myCustomers); ?></div>
-                <div class="kpi-label">My Customers</div>
-            </div>
-        </div>
-        <div class="col-md-3 col-sm-6">
+        <div class="col-md-4 col-sm-6">
             <a href="customer_inbox.php" style="text-decoration:none;">
-                <div class="kpi-card kpi-blue fade-in" style="animation-delay:.05s">
+                <div class="kpi-card kpi-blue fade-in">
                     <div class="kpi-bg"></div>
                     <div class="kpi-icon"><i class="bi bi-inbox-fill"></i></div>
-                    <div class="kpi-value"><?php echo number_format($newAssignments); ?></div>
-                    <div class="kpi-label">New Assignments (Pending)</div>
+                    <div class="kpi-value"><?php echo number_format($pendingAcceptance); ?></div>
+                    <div class="kpi-label">Pending Acceptance</div>
                 </div>
             </a>
         </div>
-        <div class="col-md-3 col-sm-6">
-            <div class="kpi-card kpi-green fade-in" style="animation-delay:.1s">
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.05s">
                 <div class="kpi-bg"></div>
-                <div class="kpi-icon"><i class="bi bi-chat-left-dots-fill"></i></div>
-                <div class="kpi-value"><?php echo number_format($openConversations); ?></div>
-                <div class="kpi-label">My Open Chats</div>
+                <div class="kpi-icon"><i class="bi bi-check-circle-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($acceptedToday); ?></div>
+                <div class="kpi-label">Accepted Today</div>
             </div>
         </div>
-        <div class="col-md-3 col-sm-6">
-            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.15s">
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-purple fade-in" style="animation-delay:.1s">
                 <div class="kpi-bg"></div>
-                <div class="kpi-icon"><i class="bi bi-chat-left-x-fill"></i></div>
-                <div class="kpi-value"><?php echo number_format($closedConversations); ?></div>
-                <div class="kpi-label">My Closed Chats</div>
+                <div class="kpi-icon"><i class="bi bi-people-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($myActiveCustomers); ?></div>
+                <div class="kpi-label">My Active Customers</div>
             </div>
         </div>
     <?php endif; ?>
