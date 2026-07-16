@@ -1,0 +1,183 @@
+openapi: 3.0.3
+info:
+  title: WA SaaS Management Web Portal API
+  description: API Documentation for WhatsApp integration, live chat, internal messaging, and custom automation rules.
+  version: 1.0.0
+servers:
+  - url: http://localhost/wa_saas
+    description: Local development server
+paths:
+  /api/get_messages.php:
+    get:
+      summary: Retrieve messages for a conversation
+      description: Returns chat messages with support for real-time polling updates.
+      parameters:
+        - name: conv_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Unique conversation ID.
+        - name: last_msg_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Return messages with ID greater than this value for delta loading.
+      responses:
+        '200':
+          description: Successful execution.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+
+  /api/send_chat.php:
+    post:
+      summary: Send a WhatsApp message to customer
+      description: Dispatches text or media messages via Meta Cloud API.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                conversation_id:
+                  type: integer
+                message_type:
+                  type: string
+                  enum: [text, image, document]
+                message:
+                  type: string
+                attachment:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Message dispatched.
+
+  /api/get_new_incoming_messages.php:
+    get:
+      summary: Poll for new incoming WhatsApp messages
+      description: Used by the global notification toaster system.
+      parameters:
+        - name: last_check_time
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date-time
+          description: Timestamp of last check.
+      responses:
+        '200':
+          description: New messages payload.
+
+  /api/get_internal_messages.php:
+    get:
+      summary: Retrieve internal team chat logs
+      description: Lists conversation messages between two employee colleagues.
+      parameters:
+        - name: partner_id
+          in: query
+          required: true
+          schema:
+            type: integer
+        - name: last_msg_id
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Messages retrieved.
+
+  /api/send_internal_chat.php:
+    post:
+      summary: Send an internal chat message
+      description: Delivers private messages within the team.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                partner_id:
+                  type: integer
+                message:
+                  type: string
+      responses:
+        '200':
+          description: Delivered.
+
+  /api/export_chat_excel.php:
+    get:
+      summary: Export conversation log to Excel
+      parameters:
+        - name: conv_id
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Binary file stream.
+
+  /webhook/receive.php:
+    get:
+      summary: Verify Webhook URL
+      description: Hub verification handshake for WhatsApp Webhook validation.
+      parameters:
+        - name: hub.mode
+          in: query
+          schema:
+            type: string
+        - name: hub.challenge
+          in: query
+          schema:
+            type: string
+        - name: hub.verify_token
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Handshake successful.
+    post:
+      summary: Receive Incoming Message Webhook
+      description: Processes WhatsApp webhook events and stores incoming payloads.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Received successfully.
+
+components:
+  schemas:
+    Message:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversation_id:
+          type: integer
+        direction:
+          type: string
+          enum: [in, out]
+        body:
+          type: string
+        user_id:
+          type: integer
+        sent_at:
+          type: string
+          format: date-time
+        message_type:
+          type: string

@@ -1,6 +1,11 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Employee/EmployeeRepository.php');
+require_once(__DIR__ . '/../core/WhatsAppNumber/WhatsAppNumberRepository.php');
+
+use Core\Employee\EmployeeRepository;
+use Core\WhatsAppNumber\WhatsAppNumberRepository;
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -8,33 +13,31 @@ if (!isset($_SESSION['company_id'])) {
 }
 
 $company_id = $_SESSION['company_id'];
+$empRepo = new EmployeeRepository($conn);
+$waNumRepo = new WhatsAppNumberRepository($conn);
 
 // جلب موظفي الشركة
-$stmt = $conn->prepare("SELECT * FROM users WHERE company_id = ?");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$employees = $stmt->get_result();
+$employeesList = $empRepo->getEmployees($company_id);
+
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
 
 // إضافة رقم واتساب
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'whatsapp_numbers')) {
+        die("Invalid CSRF Token.");
+    }
 
-    $user_id = $_POST['user_id'];
-    $phone_number_id = $_POST['phone_number_id'];
+    $user_id = (int)$_POST['user_id'];
+    $phone_number_id = trim($_POST['phone_number_id']);
 
-    // تأكد إن الموظف مش مضاف له رقم قبل كده
-    $check = $conn->prepare("SELECT * FROM whatsapp_numbers WHERE user_id = ?");
-    $check->bind_param("i", $user_id);
-    $check->execute();
-    $exists = $check->get_result();
+    $existing = $waNumRepo->getPhoneNumberIdByUserId($user_id);
 
-    if ($exists->num_rows > 0) {
+    if ($existing !== null) {
         $error = "⚠ This employee already has a WhatsApp number.";
     } else {
-
-        $stmt = $conn->prepare("INSERT INTO whatsapp_numbers (user_id, phone_number_id) VALUES (?, ?)");
-        $stmt->bind_param("is", $user_id, $phone_number_id);
-        $stmt->execute();
-
+        $empRepo->upsertPhoneNumber($user_id, $phone_number_id);
         $success = "✅ WhatsApp number linked successfully!";
     }
 }
@@ -53,16 +56,17 @@ include("../layouts/header.php");
         <?php endif; ?>
 
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('whatsapp_numbers'); ?>">
 
             <div class="mb-3">
                 <label>Select Employee</label>
                 <select name="user_id" class="form-control" required>
                     <option value="">Choose employee</option>
-                    <?php while($emp = $employees->fetch_assoc()): ?>
+                    <?php foreach($employeesList as $emp): ?>
                         <option value="<?php echo $emp['id']; ?>">
-                            <?php echo $emp['name']; ?>
+                            <?php echo htmlspecialchars($emp['name']); ?>
                         </option>
-                    <?php endwhile; ?>
+                    <?php endforeach; ?>
                 </select>
             </div>
 

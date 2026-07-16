@@ -1,6 +1,11 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Auth/AuthRepository.php');
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+
+use Core\Auth\AuthRepository;
+use Core\Company\CompanyRepository;
 
 // إذا كان المستخدم مسجل دخوله بالفعل، يتم توجيهه للـ Dashboard فوراً
 if (isset($_SESSION['company_id'])) {
@@ -10,28 +15,24 @@ if (isset($_SESSION['company_id'])) {
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-    $name = trim($_POST['name']);
-    $email = trim($_POST['email']);
-    $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-    $company_code = trim($_POST['company_code']);
+    $name = isset($_POST['name']) ? trim($_POST['name']) : '';
+    $email = isset($_POST['email']) ? trim($_POST['email']) : '';
+    $password = isset($_POST['password']) ? password_hash($_POST['password'], PASSWORD_DEFAULT) : '';
+    $company_code = isset($_POST['company_code']) ? trim($_POST['company_code']) : '';
+    $authRepo = new AuthRepository($conn);
+    $companyRepo = new CompanyRepository($conn);
 
     // نبحث عن الشركة بالكود
-    $stmt = $conn->prepare("SELECT id FROM companies WHERE company_code = ?");
-    $stmt->bind_param("s", $company_code);
-    $stmt->execute();
-    $result = $stmt->get_result();
+    $company = $companyRepo->findByCompanyCode($company_code);
 
-    if ($result->num_rows > 0) {
-
-        $company = $result->fetch_assoc();
+    if ($company) {
         $company_id = $company['id'];
 
-        $stmt = $conn->prepare("INSERT INTO users (company_id, name, email, password, role) VALUES (?, ?, ?, ?, 'employee')");
-        $stmt->bind_param("isss", $company_id, $name, $email, $password);
+        $newId = $authRepo->createEmployee($name, $email, $password, $company_id);
 
-        if ($stmt->execute()) {
+        if ($newId) {
 
-            $_SESSION['user_id'] = $stmt->insert_id;
+            $_SESSION['user_id'] = $newId;
             $_SESSION['company_id'] = $company_id;
             $_SESSION['user_name'] = $name;
             $_SESSION['role'] = "employee";

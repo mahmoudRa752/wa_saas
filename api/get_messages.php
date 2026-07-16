@@ -12,6 +12,15 @@ error_reporting(0);
 
 session_start();
 require_once(__DIR__ . '/../config/db.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationRepository.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationService.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageService.php');
+
+use Core\Conversation\ConversationRepository;
+use Core\Conversation\ConversationService;
+use Core\ChatMessage\ChatMessageRepository;
+use Core\ChatMessage\ChatMessageService;
 
 ob_clean();
 
@@ -37,35 +46,19 @@ if ($convId <= 0) {
 }
 
 // التحقق من الملكية
-$check = $conn->prepare("SELECT id FROM conversations WHERE id = ? AND company_id = ? LIMIT 1");
-$check->bind_param('ii', $convId, $companyId);
-$check->execute();
-if ($check->get_result()->num_rows === 0) {
+$convService = new ConversationService(new ConversationRepository($conn));
+$conv = $convService->getForCompany($convId, $companyId);
+
+if (!$conv) {
     jsonExit(['error' => 'Forbidden'], 403);
 }
-$check->close();
 
 // جلب الرسائل الجديدة فقط
-$stmt = $conn->prepare("
-    SELECT
-        cm.id,
-        cm.direction,
-        cm.body,
-        cm.sent_at,
-        u.name AS sender_name
-    FROM chat_messages cm
-    LEFT JOIN users u ON cm.user_id = u.id
-    WHERE cm.conversation_id = ?
-      AND cm.id > ?
-    ORDER BY cm.sent_at ASC
-    LIMIT 50
-");
-$stmt->bind_param('ii', $convId, $afterId);
-$stmt->execute();
-$result = $stmt->get_result();
+$chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
+$rawMessages = $chatMsgService->getMessagesSince($convId, $afterId);
 
 $messages = [];
-while ($row = $result->fetch_assoc()) {
+foreach ($rawMessages as $row) {
     $messages[] = [
         'id'          => (int) $row['id'],
         'direction'   => $row['direction'],
@@ -74,6 +67,5 @@ while ($row = $result->fetch_assoc()) {
         'sender_name' => $row['sender_name'] ?? 'You',
     ];
 }
-$stmt->close();
 
 jsonExit(['messages' => $messages]);

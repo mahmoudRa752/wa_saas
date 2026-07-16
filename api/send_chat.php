@@ -4,6 +4,20 @@
 // ==========================================
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Conversation/Conversation.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationRepository.php');
+require_once(__DIR__ . '/../core/Conversation/ConversationService.php');
+require_once(__DIR__ . '/../core/WhatsAppNumber/WhatsAppNumberRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageRepository.php');
+require_once(__DIR__ . '/../core/ChatMessage/ChatMessageService.php');
+require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
+
+use Core\Conversation\ConversationRepository;
+use Core\Conversation\ConversationService;
+use Core\WhatsAppNumber\WhatsAppNumberRepository;
+use Core\ChatMessage\ChatMessageRepository;
+use Core\ChatMessage\ChatMessageService;
+use Core\Services\WhatsAppService;
 
 header('Content-Type: application/json');
 
@@ -28,35 +42,47 @@ if ($conversationId <= 0) {
     exit;
 }
 
-// 1. جلب بيانات رقم الواتساب المخصص للمستخدم الحالي (أدمن أو موظف) لضمان عدم التداخل
-$numQuery = $conn->prepare("SELECT phone_number_id, whatsapp_business_account_id, access_token FROM whatsapp_numbers WHERE user_id = ? LIMIT 1");
-$numQuery->bind_param('i', $currentUserId);
-$numQuery->execute();
-$numResult = $numQuery->get_result()->fetch_assoc();
-$numQuery->close();
+// ملاحظة: جدول whatsapp_numbers الحالي لا يحتوي على عمود access_token
+// (نفس التوكن المستخدم قديمًا داخل dashboard/chat.php مباشرة قبل الفصل).
+// نُبقيه هنا كثابت مؤقت لحين نقله لمكان آمن (متغير بيئة / إعدادات)، وهذا
+// نفس التوكن الذي كان يعمل فعليًا في الكود الأصلي.
+const WHATSAPP_ACCESS_TOKEN = "EAAZBGtwMbSu0BR2aV2JmjOSNmHHBQAHrYyCcjDoSZCktJ5seX4XXGy8ci42Gb46oz2ZCZAWwOZBCF35kGXH9euUYgSeiZBJL5qeXtk1VXcPW9HM3idG1pZBh8R3LuAxOUKkjHA0cDd7j3gA6j57ym9EjPCfoSFRmtukVfP4nktiHnsmZCUCSlmGvWn6A7UYtklN0Brsk2LdKavex72zsvvzcRxSFaR1ZArhzO60furZCFxo7jS2hfTuVGl1aypLrqCAihmvNVYPVFcegtjDHZB91xApTZCn3";
 
-if (!$numResult) {
-    echo json_encode(['error' => 'لم يتم العثور على رقم واتساب مخصص لهذا الحساب. تأكد من ربطه في قاعدة البيانات.']);
+// 1. جلب بيانات رقم الواتساب المخصص للمستخدم الحالي (أدمن أو موظف) لضمان عدم التداخل
+$waNumberRepo = new WhatsAppNumberRepository($conn);
+$phoneNumberId = null;
+
+if ($currentUserId > 0) {
+    $phoneNumberId = $waNumberRepo->getPhoneNumberIdByUserId($currentUserId);
+}
+
+// Fallback: حسابات الأدمن/الشركة (auth/login_company.php) لا تُسجّل user_id في
+// الجلسة أصلاً لأن الأدمن ليس له صف في جدول users، فـ $currentUserId يكون 0
+// ولن يوجد له رقم واتساب شخصي مباشرة. في هذه الحالة نستخدم أي رقم واتساب
+// مربوط بأحد موظفي نفس الشركة كرقم افتراضي، حتى لا يفشل الإرسال بالكامل.
+if (!$phoneNumberId) {
+    $phoneNumberId = $waNumberRepo->getPhoneNumberIdByCompanyId($companyId);
+}
+
+if (!$phoneNumberId) {
+    echo json_encode(['error' => 'لم يتم العثور على رقم واتساب مخصص لهذا الحساب أو لأي موظف في الشركة. تأكد من ربط رقم واتساب واحد على الأقل من صفحة "أرقام واتساب".']);
     exit;
 }
 
-$phoneNumberId = $numResult['phone_number_id'];
-$accessToken   = $numResult['access_token'];
+$accessToken = getenv('WHATSAPP_TOKEN') ?: (defined('WHATSAPP_TOKEN') ? WHATSAPP_TOKEN : WHATSAPP_ACCESS_TOKEN);
 
-// 2. جلب رقم هاتف العميل من المحادثة الحالية
-$convQuery = $conn->prepare("SELECT contact_number FROM conversations WHERE id = ? AND company_id = ? LIMIT 1");
-$convQuery->bind_param('ii', $conversationId, $companyId);
-$convQuery->execute();
-$conv = $convQuery->get_result()->fetch_assoc();
-$convQuery->close();
+// 2. جلب رقم هاتف العميل من المحادثة الحالية (via ConversationService)
+$convService = new ConversationService(new ConversationRepository($conn));
+$conv        = $convService->getForCompany($conversationId, $companyId);
 
 if (!$conv) {
     echo json_encode(['error' => 'Conversation not found']);
     exit;
 }
 
-$to = $conv['contact_number'];
+$to = $conv->contactNumber;
 $filePath = null;
+$whatsAppService = new WhatsAppService();
 
 // 3. معالجة المرفقات (إن وجدت)
 if ($messageType !== 'text' && isset($_FILES['attachment']) && $_FILES['attachment']['error'] === UPLOAD_ERR_OK) {
@@ -77,7 +103,6 @@ if ($messageType !== 'text' && isset($_FILES['attachment']) && $_FILES['attachme
 }
 
 // 4. إعداد وإرسال طلب Meta API بناءً على بيانات رقم المستخدم الحالي
-$url = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
 $payload = [
     "messaging_product" => "whatsapp",
     "recipient_type"    => "individual",
@@ -103,19 +128,10 @@ if ($messageType === 'text') {
     }
 }
 
-$ch = curl_init($url);
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    "Authorization: Bearer " . $accessToken,
-    "Content-Type: application/json"
-]);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-$response = curl_exec($ch);
-$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
+$sendResult = $whatsAppService->sendPayload($phoneNumberId, $payload, $accessToken);
+$response = $sendResult['response'];
+$httpCode = $sendResult['httpCode'];
 
-$resData = json_encode($response);
 $wamid = null;
 
 if ($httpCode >= 200 && $httpCode < 300) {
@@ -124,25 +140,29 @@ if ($httpCode >= 200 && $httpCode < 300) {
 }
 
 // 5. حفظ الرسالة في قاعدة البيانات مع ربطها بالـ user_id الخاص بالمرسل الحالي
-$insStmt = $conn->prepare("
-    INSERT INTO chat_messages (conversation_id, user_id, direction, body, message_type, file_path, whatsapp_msg_id, sent_at) 
-    VALUES (?, ?, 'out', ?, ?, ?, ?, NOW())
-");
-$insStmt->bind_param('iisssss', $conversationId, $currentUserId, $messageBody, $messageType, $filePath, $wamid);
-$insStmt->execute();
-$newMsgId = $insStmt->insert_id;
-$insStmt->close();
+$chatMsgService = new ChatMessageService(new ChatMessageRepository($conn));
+$newMsgId = $chatMsgService->insertMessage(
+    $conversationId,
+    'out',
+    $messageBody,
+    $currentUserId,
+    $wamid,
+    $messageType,
+    $filePath
+);
 
-// تحديث وقت آخر رسالة في المحادثة
-$upd = $conn->prepare("UPDATE conversations SET last_message_at = NOW() WHERE id = ?");
-$upd->bind_param('i', $conversationId);
-$upd->execute();
-$upd->close();
+// تحديث وقت آخر رسالة في المحادثة (via ConversationService)
+$convService->touch($conversationId);
+$conn->query("UPDATE conversations SET last_incoming_at = NULL, sla_status = 'normal' WHERE id = " . (int)$conversationId);
 
 echo json_encode([
-    'success'      => true,
-    'id'           => $newMsgId,
-    'file_path'    => $filePath,
-    'sent_at'      => date('Y-m-d H:i:s'),
-    'meta_status'  => $httpCode
+    'success'       => true,
+    'id'            => $newMsgId,
+    'file_path'     => $filePath,
+    'sent_at'       => date('Y-m-d H:i:s'),
+    'meta_status'   => $httpCode,
+    // مؤقت للتشخيص فقط: نص خطأ Meta الكامل حتى نعرف السبب الدقيق للفشل.
+    // يُحذف بعد حل المشكلة.
+    'meta_response' => $response,
+    'phone_number_id_used' => $phoneNumberId
 ]);

@@ -1,24 +1,77 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
 require_once(__DIR__ . "/../config/db.php");
+require_once(__DIR__ . "/../core/Auth/SecurityHelper.php");
+require_once(__DIR__ . "/../core/Auth/RateLimiter.php");
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+
+use Core\Auth\SecurityHelper;
+use Core\Auth\RateLimiter;
+use Core\Company\CompanyRepository;
+
+SecurityHelper::enforceHeaders();
+if (!RateLimiter::check('dashboard', 100, 60)) {
+    http_response_code(429);
+    die("Too Many Requests. Please slow down.");
+}
 
 $companyLogo = null;
 if (isset($_SESSION['company_id'])) {
-    $stmt = $conn->prepare("SELECT logo FROM companies WHERE id = ?");
-    $stmt->bind_param("i", $_SESSION['company_id']);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
+    if ($_SESSION['role'] === 'admin' && !isset($_SESSION['user_id'])) {
+        $stmt = $conn->prepare("SELECT id, name FROM users WHERE company_id = ? AND role = 'admin' LIMIT 1");
+        $cid = (int)$_SESSION['company_id'];
+        $stmt->bind_param("i", $cid);
+        $stmt->execute();
+        $adminUser = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
+
+        if (!$adminUser) {
+            $stmt = $conn->prepare("SELECT email, password, name FROM companies WHERE id = ? LIMIT 1");
+            $stmt->bind_param("i", $cid);
+            $stmt->execute();
+            $comp = $stmt->get_result()->fetch_assoc();
+            $stmt->close();
+
+            if ($comp) {
+                $adminName = $comp['name'] . " (Admin)";
+                $adminEmail = $comp['email'];
+                $adminPass = $comp['password'];
+                $roleAdmin = 'admin';
+                $stmt = $conn->prepare("INSERT INTO users (company_id, name, email, password, role) VALUES (?, ?, ?, ?, ?)");
+                $stmt->bind_param("issss", $cid, $adminName, $adminEmail, $adminPass, $roleAdmin);
+                $stmt->execute();
+                $_SESSION['user_id'] = $conn->insert_id;
+                $_SESSION['user_name'] = $adminName;
+                $stmt->close();
+            }
+        } else {
+            $_SESSION['user_id'] = $adminUser['id'];
+            $_SESSION['user_name'] = $adminUser['name'];
+        }
+    }
+
+    $companyRepo = new CompanyRepository($conn);
+    $row = $companyRepo->getById((int)$_SESSION['company_id']);
     $companyLogo = $row['logo'] ?? null;
 }
 $currentPage = basename($_SERVER['PHP_SELF']);
 $titles = [
         'index.php'            => 'Dashboard',
         'send.php'             => 'Send Message',
-        'bulk_send.php'        => 'Bulk Send',
+        'broadcasts.php'       => 'Broadcast Campaigns',
+        'automations.php'      => 'Auto-Replies & Automation',
+        'chat.php'             => 'Live Chat',
+        'customers.php'        => 'Customer Manager',
+        'customer_inbox.php'   => 'Customer Inbox',
+        'deals.php'            => 'Sales Pipeline',
+        'deal_reports.php'     => 'Deals Analytics',
+        'search.php'           => 'Advanced Search',
+        'internal_chat.php'    => 'Internal Chat',
         'employees.php'        => 'Employees',
-        'whatsapp_numbers.php' => 'WhatsApp Numbers',
+        'employee_performance.php' => 'Employee Performance',
+        'audit_logs.php'       => 'Audit Logs',
+        'settings.php'         => 'Settings',
         'upgrade.php'          => 'Upgrade Plan',
-        'company_profile.php'  => 'Company Profile',
         'user_profile.php'     => 'My Profile',
 ];
 $pageTitle = $titles[$currentPage] ?? 'WA Manager';
@@ -221,11 +274,44 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
             <a href="/wa_saas/dashboard/send.php" class="nav-link <?php echo $currentPage === 'send.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-send-fill"></i></span> Send Message
             </a>
-            <a href="/wa_saas/dashboard/bulk_send.php" class="nav-link <?php echo $currentPage === 'bulk_send.php' ? 'active' : ''; ?>">
-                <span class="nav-icon"><i class="bi bi-collection-fill"></i></span> Bulk Send
+            <a href="/wa_saas/dashboard/broadcasts.php" class="nav-link <?php echo $currentPage === 'broadcasts.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-broadcast"></i></span> Broadcast Campaigns
+            </a>
+            <a href="/wa_saas/dashboard/automations.php" class="nav-link <?php echo $currentPage === 'automations.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-robot"></i></span> Auto-Replies
             </a>
             <a href="/wa_saas/dashboard/chat.php" class="nav-link <?php echo $currentPage === 'chat.php' ? 'active' : ''; ?>">
                 <span class="nav-icon"><i class="bi bi-chat-dots-fill"></i></span> Live Chat
+            </a>
+            <a href="/wa_saas/dashboard/customers.php" class="nav-link <?php echo $currentPage === 'customers.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-person-lines-fill"></i></span> Customer Manager
+            </a>
+            <a href="/wa_saas/dashboard/deals.php" class="nav-link <?php echo $currentPage === 'deals.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-kanban"></i></span> Sales Pipeline
+            </a>
+            <a href="/wa_saas/dashboard/deal_reports.php" class="nav-link <?php echo $currentPage === 'deal_reports.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-graph-up-arrow"></i></span> Deals Analytics
+            </a>
+            <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'employee'): ?>
+                <a href="/wa_saas/dashboard/customer_inbox.php" class="nav-link <?php echo $currentPage === 'customer_inbox.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-inbox-fill"></i></span> Customer Inbox
+                    <?php
+                    $eId = (int)$_SESSION['user_id'];
+                    $cId = (int)$_SESSION['company_id'];
+                    $cntRes = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $cId AND assigned_to = $eId AND assignment_status = 'pending'");
+                    $cntRow = $cntRes ? $cntRes->fetch_row() : [0];
+                    $pendingCount = (int)($cntRow[0] ?? 0);
+                    if ($pendingCount > 0) {
+                        echo '<span class="badge bg-danger ms-auto rounded-pill">' . $pendingCount . '</span>';
+                    }
+                    ?>
+                </a>
+            <?php endif; ?>
+            <a href="/wa_saas/dashboard/search.php" class="nav-link <?php echo $currentPage === 'search.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-search"></i></span> Advanced Search
+            </a>
+            <a href="/wa_saas/dashboard/internal_chat.php" class="nav-link <?php echo $currentPage === 'internal_chat.php' ? 'active' : ''; ?>">
+                <span class="nav-icon"><i class="bi bi-chat-left-text-fill"></i></span> Internal Chat
             </a>
 
             <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'admin'): ?>
@@ -233,22 +319,28 @@ $pageTitle = $titles[$currentPage] ?? 'WA Manager';
                 <a href="/wa_saas/dashboard/employees.php" class="nav-link <?php echo $currentPage === 'employees.php' ? 'active' : ''; ?>">
                     <span class="nav-icon"><i class="bi bi-people-fill"></i></span> Employees
                 </a>
-                <a href="/wa_saas/dashboard/whatsapp_numbers.php" class="nav-link <?php echo $currentPage === 'whatsapp_numbers.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon"><i class="bi bi-phone-fill"></i></span> WA Numbers
+                <a href="/wa_saas/dashboard/employee_performance.php" class="nav-link <?php echo $currentPage === 'employee_performance.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-bar-chart-line-fill"></i></span> Performance
+                </a>
+                <a href="/wa_saas/dashboard/audit_logs.php" class="nav-link <?php echo $currentPage === 'audit_logs.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-shield-check"></i></span> Audit Logs
                 </a>
                 <a href="/wa_saas/dashboard/upgrade.php" class="nav-link <?php echo $currentPage === 'upgrade.php' ? 'active' : ''; ?>">
                     <span class="nav-icon"><i class="bi bi-lightning-charge-fill"></i></span> Upgrade Plan
                 </a>
                 <div class="nav-section-title">Settings</div>
-                <a href="/wa_saas/dashboard/company_profile.php" class="nav-link <?php echo $currentPage === 'company_profile.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon"><i class="bi bi-building-fill"></i></span> Company Profile
+                <a href="/wa_saas/dashboard/settings.php" class="nav-link <?php echo $currentPage === 'settings.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-gear-fill"></i></span> System Settings
                 </a>
             <?php endif; ?>
 
             <?php if (isset($_SESSION['role']) && $_SESSION['role'] === 'employee'): ?>
                 <div class="nav-section-title">Account</div>
                 <a href="/wa_saas/dashboard/user_profile.php" class="nav-link <?php echo $currentPage === 'user_profile.php' ? 'active' : ''; ?>">
-                    <span class="nav-icon"><i class="bi bi-person-circle"></i></span> My Profile
+                    <span class="nav-icon"><i class="bi bi-person-bounding-box"></i></span> My Profile
+                </a>
+                <a href="/wa_saas/dashboard/settings.php" class="nav-link <?php echo $currentPage === 'settings.php' ? 'active' : ''; ?>">
+                    <span class="nav-icon"><i class="bi bi-gear-fill"></i></span> Preferences & Roles
                 </a>
             <?php endif; ?>
         </nav>

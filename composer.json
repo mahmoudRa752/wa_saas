@@ -1,5 +1,18 @@
 {
     "require": {
         "phpoffice/phpspreadsheet": "^5.8"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "Core\\": "core/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        }
     }
 }

@@ -1,6 +1,13 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Services/UsageService.php');
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+require_once(__DIR__ . '/../core/MessageLog/MessageLogRepository.php');
+
+use Core\Services\UsageService;
+use Core\Company\CompanyRepository;
+use Core\MessageLog\MessageLogRepository;
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -8,89 +15,177 @@ if (!isset($_SESSION['company_id'])) {
 }
 
 $company_id = $_SESSION['company_id'];
+$usageService = new UsageService($conn);
+$companyRepo = new CompanyRepository($conn);
+$msgLogRepo = new MessageLogRepository($conn);
 
-// إجمالي الرسائل
+// Standard metrics
+$totalMessages = $msgLogRepo->getTotalMessagesForCompany($company_id);
+$usageSummary = $usageService->getSubscriptionUsageSummary($company_id);
+$monthlyMessages = $usageSummary['monthlyMessages'];
+$totalEmployees = $companyRepo->getTotalEmployees($company_id);
+$planName = $usageSummary['planName'];
+$limit    = $usageSummary['limit'];
+$endDate  = $usageSummary['endDate'];
+$usagePercent = $usageSummary['usagePercent'];
+
+// Recent activity
+$recentMessagesList = $msgLogRepo->getRecentMessagesForCompany($company_id, 5);
+
+// CRM dashboard metrics
+$role = $_SESSION['role'];
+
+require_once(__DIR__ . '/../core/TenantContext.php');
+$ctx = \Core\TenantContext::forCompany($company_id);
+
+$userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+if ($userId === 0 && isset($_SESSION['company_id'])) {
+    $stmt = $conn->prepare("SELECT id FROM users WHERE company_id = ? AND role = 'admin' LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $_SESSION['company_id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if ($row) {
+            $userId = (int)$row['id'];
+            $_SESSION['user_id'] = $userId;
+        }
+        $stmt->close();
+    }
+}
+
+if ($role === 'admin') {
+    // 1. New Leads (WhatsApp Inbound)
+    $resLeads = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND source_file = 'WhatsApp Inbound'");
+    $newLeads = $resLeads ? (int)($resLeads->fetch_row()[0] ?? 0) : 0;
+
+    // 2. Pending Assignment (Unassigned)
+    $resPendingAssign = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND (assigned_to IS NULL OR assignment_status = 'unassigned')");
+    $pendingAssignment = $resPendingAssign ? (int)($resPendingAssign->fetch_row()[0] ?? 0) : 0;
+
+    // 3. Assigned Today
+    $resAssToday = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to IS NOT NULL AND DATE(assigned_at) = CURRENT_DATE()");
+    $assignedToday = $resAssToday ? (int)($resAssToday->fetch_row()[0] ?? 0) : 0;
+
+    // 4. Waiting Acceptance (Pending)
+    $resWaitAcc = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assignment_status = 'pending'");
+    $waitingAcceptance = $resWaitAcc ? (int)($resWaitAcc->fetch_row()[0] ?? 0) : 0;
+} else {
+    // 1. Pending Acceptance
+    $resPendingAcc = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'pending'");
+    $pendingAcceptance = $resPendingAcc ? (int)($resPendingAcc->fetch_row()[0] ?? 0) : 0;
+
+    // 2. Accepted Today
+    $resAccToday = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'accepted' AND DATE(assigned_at) = CURRENT_DATE()");
+    $acceptedToday = $resAccToday ? (int)($resAccToday->fetch_row()[0] ?? 0) : 0;
+
+    // 3. My Active Customers
+    $resActive = $conn->query("SELECT COUNT(*) FROM customers WHERE company_id = $company_id AND assigned_to = $userId AND assignment_status = 'accepted'");
+    $myActiveCustomers = $resActive ? (int)($resActive->fetch_row()[0] ?? 0) : 0;
+}
+
+// ── DEALS CRM KANBAN & REMINDERS ──
+require_once(__DIR__ . '/../core/Deal/DealRepository.php');
+$dealRepo = new \Core\Deal\DealRepository($conn);
+
+if ($role === 'admin') {
+    $dealKPIs = $dealRepo->getAdminKPIs($ctx);
+} else {
+    $dealKPIs = $dealRepo->getEmployeeKPIs($ctx, $userId);
+}
+
+$todayFollowups = $dealRepo->getReminders($ctx, $userId, 'today', $role);
+$overdueFollowups = $dealRepo->getReminders($ctx, $userId, 'overdue', $role);
+$tomorrowFollowups = $dealRepo->getReminders($ctx, $userId, 'tomorrow', $role);
+
+$totalReminders = count($todayFollowups) + count($overdueFollowups);
+
+
+// ── NEW ADVANCED ANALYTICS QUERIES ──
+
+// 1. Conversation status counts
+$statusCounts = ['open' => 0, 'pending' => 0, 'closed' => 0];
+$stmt = $conn->prepare("SELECT status, COUNT(*) as count FROM conversations WHERE company_id = ? GROUP BY status");
+$stmt->bind_param("i", $company_id);
+$stmt->execute();
+$res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+foreach ($res as $row) {
+    if (isset($statusCounts[$row['status']])) {
+        $statusCounts[$row['status']] = (int) $row['count'];
+    }
+}
+$stmt->close();
+$totalConversations = array_sum($statusCounts);
+
+// 2. Sent vs Failed messages over the last 7 days
+$dailyStats = [];
+for ($i = 6; $i >= 0; $i--) {
+    $dateStr = date('Y-m-d', strtotime("-$i days"));
+    $dailyStats[$dateStr] = ['sent' => 0, 'failed' => 0];
+}
+
 $stmt = $conn->prepare("
-    SELECT COUNT(*) as total
+    SELECT DATE(m.sent_at) as date,
+           SUM(CASE WHEN m.status = 'sent' THEN 1 ELSE 0 END) as sent_count,
+           SUM(CASE WHEN m.status = 'failed' THEN 1 ELSE 0 END) as failed_count
     FROM messages m
     JOIN users u ON m.user_id = u.id
-    WHERE u.company_id = ?
+    WHERE u.company_id = ? AND m.sent_at >= DATE_SUB(CURRENT_DATE(), INTERVAL 6 DAY)
+    GROUP BY DATE(m.sent_at)
+    ORDER BY DATE(m.sent_at) ASC
 ");
 $stmt->bind_param("i", $company_id);
 $stmt->execute();
-$totalMessages = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$res = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+foreach ($res as $row) {
+    if (isset($dailyStats[$row['date']])) {
+        $dailyStats[$row['date']]['sent'] = (int) $row['sent_count'];
+        $dailyStats[$row['date']]['failed'] = (int) $row['failed_count'];
+    }
+}
+$stmt->close();
 
-// رسائل هذا الشهر
+$chartDates = array_keys($dailyStats);
+$chartSent = array_column($dailyStats, 'sent');
+$chartFailed = array_column($dailyStats, 'failed');
+
+// 3. Employee message volumes (productivity check)
 $stmt = $conn->prepare("
-    SELECT COUNT(*) as total
-    FROM messages m
-    JOIN users u ON m.user_id = u.id
+    SELECT u.name, COUNT(m.id) as message_count
+    FROM users u
+    LEFT JOIN messages m ON u.id = m.user_id
     WHERE u.company_id = ?
-    AND MONTH(m.sent_at) = MONTH(CURRENT_DATE())
-    AND YEAR(m.sent_at) = YEAR(CURRENT_DATE())
+    GROUP BY u.id
+    ORDER BY message_count DESC
+    LIMIT 6
 ");
 $stmt->bind_param("i", $company_id);
 $stmt->execute();
-$monthlyMessages = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$empStats = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 
-// عدد الموظفين
-$stmt = $conn->prepare("SELECT COUNT(*) as total FROM users WHERE company_id = ?");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$totalEmployees = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
-
-// الاشتراك الحالي
-$stmt = $conn->prepare("
-    SELECT p.name, p.monthly_limit, s.end_date
-    FROM subscriptions s
-    JOIN plans p ON s.plan_id = p.id
-    WHERE s.company_id = ? AND s.status = 'active'
-    LIMIT 1
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$subscription = $stmt->get_result()->fetch_assoc();
-
-$planName = $subscription['name'] ?? 'No Plan';
-$limit    = $subscription['monthly_limit'] ?? 0;
-$endDate  = $subscription['end_date'] ?? null;
-
-$usagePercent = ($limit > 0) ? min(100, round(($monthlyMessages / $limit) * 100)) : 0;
-
-// آخر 5 رسائل
-$stmt = $conn->prepare("
-    SELECT m.recipient, m.status, m.sent_at
-    FROM messages m
-    JOIN users u ON m.user_id = u.id
-    WHERE u.company_id = ?
-    ORDER BY m.sent_at DESC
-    LIMIT 5
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$recentMessages = $stmt->get_result();
+$empNames = array_column($empStats, 'name');
+$empMessageCounts = array_column($empStats, 'message_count');
 
 include("../layouts/header.php");
 ?>
 
 <!-- KPI Cards -->
 <div class="row g-3 mb-4">
-
     <div class="col-md-3 col-sm-6">
         <div class="kpi-card kpi-purple fade-in">
             <div class="kpi-bg"></div>
             <div class="kpi-icon"><i class="bi bi-chat-dots"></i></div>
             <div class="kpi-value"><?php echo number_format($totalMessages); ?></div>
-            <div class="kpi-label">Total Messages</div>
+            <div class="kpi-label">Total Messages Sent</div>
         </div>
     </div>
 
     <div class="col-md-3 col-sm-6">
         <div class="kpi-card kpi-blue fade-in" style="animation-delay:.05s">
             <div class="kpi-bg"></div>
-            <div class="kpi-icon"><i class="bi bi-calendar-check"></i></div>
-            <div class="kpi-value"><?php echo number_format($monthlyMessages); ?></div>
-            <div class="kpi-label">This Month</div>
+            <div class="kpi-icon"><i class="bi bi-chat-left-text"></i></div>
+            <div class="kpi-value"><?php echo number_format($totalConversations); ?></div>
+            <div class="kpi-label">Conversations (<?php echo $statusCounts['open']; ?> Open)</div>
         </div>
     </div>
 
@@ -99,7 +194,7 @@ include("../layouts/header.php");
             <div class="kpi-bg"></div>
             <div class="kpi-icon"><i class="bi bi-people"></i></div>
             <div class="kpi-value"><?php echo $totalEmployees; ?></div>
-            <div class="kpi-label">Employees</div>
+            <div class="kpi-label">Active Employees</div>
         </div>
     </div>
 
@@ -113,17 +208,198 @@ include("../layouts/header.php");
             </div>
         </div>
     </div>
+</div>
 
+<!-- CRM KPI Cards -->
+<div class="row g-3 mb-4">
+    <?php if ($role === 'admin'): ?>
+        <div class="col-md-3 col-sm-6">
+            <div class="kpi-card kpi-purple fade-in">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-people-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($newLeads); ?></div>
+                <div class="kpi-label">New Leads</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.05s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-person-dash-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($pendingAssignment); ?></div>
+                <div class="kpi-label">Pending Assignment</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.1s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-person-check-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($assignedToday); ?></div>
+                <div class="kpi-label">Assigned Today</div>
+            </div>
+        </div>
+        <div class="col-md-3 col-sm-6">
+            <div class="kpi-card kpi-blue fade-in" style="animation-delay:.15s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-hourglass-split"></i></div>
+                <div class="kpi-value"><?php echo number_format($waitingAcceptance); ?></div>
+                <div class="kpi-label">Waiting Acceptance</div>
+            </div>
+        </div>
+    <?php else: ?>
+        <div class="col-md-4 col-sm-6">
+            <a href="customer_inbox.php" style="text-decoration:none;">
+                <div class="kpi-card kpi-blue fade-in">
+                    <div class="kpi-bg"></div>
+                    <div class="kpi-icon"><i class="bi bi-inbox-fill"></i></div>
+                    <div class="kpi-value"><?php echo number_format($pendingAcceptance); ?></div>
+                    <div class="kpi-label">Pending Acceptance</div>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.05s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-check-circle-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($acceptedToday); ?></div>
+                <div class="kpi-label">Accepted Today</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-purple fade-in" style="animation-delay:.1s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-people-fill"></i></div>
+                <div class="kpi-value"><?php echo number_format($myActiveCustomers); ?></div>
+                <div class="kpi-label">My Active Customers</div>
+            </div>
+        </div>
+    <?php endif; ?>
+</div>
+
+<!-- Sales Pipeline Performance (Deals CRM) -->
+<h6 class="fw-bold mb-3 mt-4 text-dark"><i class="bi bi-funnel me-2 text-primary"></i>Sales Pipeline Performance (Deals CRM)</h6>
+<div class="row g-3 mb-4">
+    <?php if ($role === 'admin'): ?>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-purple fade-in">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-currency-dollar"></i></div>
+                <div class="kpi-value" style="font-size: 15px;"><?php echo number_format($dealKPIs['pipeline_value'], 2); ?> SAR</div>
+                <div class="kpi-label">Pipeline Value</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.05s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-trophy-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['won_deals']; ?></div>
+                <div class="kpi-label">Won Deals</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.1s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-hand-thumbs-down-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['lost_deals']; ?></div>
+                <div class="kpi-label">Lost Deals</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-blue fade-in" style="animation-delay:.15s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-percent"></i></div>
+                <div class="kpi-value"><?php echo number_format($dealKPIs['conversion_rate'], 1); ?>%</div>
+                <div class="kpi-label">Conversion Rate</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-purple fade-in" style="animation-delay:.2s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-tag-fill"></i></div>
+                <div class="kpi-value" style="font-size: 13px;"><?php echo number_format($dealKPIs['average_deal_size'], 2); ?> SAR</div>
+                <div class="kpi-label">Avg Deal Size</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-sm-4 col-6">
+            <div class="kpi-card kpi-blue fade-in" style="animation-delay:.25s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-calendar-check-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['closing_this_month']; ?></div>
+                <div class="kpi-label">Closing This Month</div>
+            </div>
+        </div>
+    <?php else: ?>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-blue fade-in">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-briefcase-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['my_deals']; ?></div>
+                <div class="kpi-label">My Deals</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-orange fade-in" style="animation-delay:.05s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-bell-fill"></i></div>
+                <div class="kpi-value"><?php echo $dealKPIs['todays_followups']; ?></div>
+                <div class="kpi-label">Today's Follow-ups</div>
+            </div>
+        </div>
+        <div class="col-md-4 col-sm-6">
+            <div class="kpi-card kpi-green fade-in" style="animation-delay:.1s">
+                <div class="kpi-bg"></div>
+                <div class="kpi-icon"><i class="bi bi-currency-dollar"></i></div>
+                <div class="kpi-value" style="font-size: 15px;"><?php echo number_format($dealKPIs['won_this_month'], 2); ?> SAR</div>
+                <div class="kpi-label">Won This Month</div>
+            </div>
+        </div>
+    <?php endif; ?>
+</div>
+
+<!-- Charts Row -->
+<div class="row g-3 mb-4">
+    <!-- Chart 1: Messages History -->
+    <div class="col-md-6 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
+            <h6 class="fw-bold mb-3"><i class="bi bi-graph-up me-2 text-primary"></i>Message History (Last 7 Days)</h6>
+            <div style="position: relative; height: 260px; width: 100%;">
+                <canvas id="messagesHistoryChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart 2: Status & Employees -->
+    <div class="col-md-3 col-sm-6 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
+            <h6 class="fw-bold mb-3"><i class="bi bi-pie-chart me-2 text-success"></i>Statuses</h6>
+            <div style="position: relative; height: 180px; width: 100%;" class="d-flex justify-content-center align-items-center">
+                <canvas id="statusChart"></canvas>
+            </div>
+            <div class="mt-3 text-center" style="font-size:12px; color:#64748b;">
+                <span class="me-2"><i class="bi bi-circle-fill text-success"></i> Open</span>
+                <span class="me-2"><i class="bi bi-circle-fill text-warning"></i> Pending</span>
+                <span><i class="bi bi-circle-fill text-secondary"></i> Closed</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart 3: Employee Productivity -->
+    <div class="col-md-3 col-sm-6 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
+            <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart me-2 text-warning"></i>Leaderboard</h6>
+            <div style="position: relative; height: 220px; width: 100%;">
+                <canvas id="employeeProductivityChart"></canvas>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Usage + Recent -->
 <div class="row g-3">
-
     <!-- Usage Bar -->
-    <div class="col-md-5">
-        <div class="card p-4 h-100">
+    <div class="col-md-5 col-12">
+        <div class="card p-4 h-100 shadow-sm border-0">
             <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0">Monthly Usage</h6>
+                <h6 class="fw-bold mb-0">Monthly Limit Usage</h6>
                 <a href="upgrade.php" class="btn btn-outline-primary btn-sm">
                     <i class="bi bi-lightning-charge me-1"></i> Upgrade
                 </a>
@@ -134,8 +410,8 @@ include("../layouts/header.php");
                     <span><?php echo number_format($monthlyMessages); ?> used</span>
                     <span><?php echo number_format($limit); ?> limit</span>
                 </div>
-                <div class="progress mb-2">
-                    <div class="progress-bar <?php echo $usagePercent >= 90 ? 'danger' : ''; ?>"
+                <div class="progress mb-2" style="height:10px;">
+                    <div class="progress-bar <?php echo $usagePercent >= 90 ? 'bg-danger' : 'bg-primary'; ?>"
                          style="width:<?php echo $usagePercent; ?>%"></div>
                 </div>
                 <div class="d-flex justify-content-between" style="font-size:12px; color:#94a3b8;">
@@ -158,17 +434,17 @@ include("../layouts/header.php");
     </div>
 
     <!-- Recent Activity -->
-    <div class="col-md-7">
-        <div class="card h-100">
-            <div class="card-header-custom d-flex align-items-center justify-content-between pb-3">
-                <span>Recent Activity</span>
+    <div class="col-md-7 col-12">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-white d-flex align-items-center justify-content-between pb-3 pt-4 px-4 border-0">
+                <h6 class="fw-bold mb-0">Recent Outbound Activity</h6>
                 <a href="send.php" class="btn btn-primary btn-sm">
                     <i class="bi bi-send me-1"></i> Send New
                 </a>
             </div>
 
-            <div class="px-3 pb-3">
-                <?php if ($recentMessages->num_rows > 0): ?>
+            <div class="px-4 pb-4">
+                <?php if (!empty($recentMessagesList)): ?>
                     <table class="table-custom w-100">
                         <thead>
                             <tr>
@@ -178,7 +454,7 @@ include("../layouts/header.php");
                             </tr>
                         </thead>
                         <tbody>
-                        <?php while ($row = $recentMessages->fetch_assoc()): ?>
+                        <?php foreach ($recentMessagesList as $row): ?>
                             <tr>
                                 <td>
                                     <i class="bi bi-phone me-1 text-muted"></i>
@@ -195,7 +471,7 @@ include("../layouts/header.php");
                                     <?php echo date('M d, H:i', strtotime($row['sent_at'])); ?>
                                 </td>
                             </tr>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                         </tbody>
                     </table>
                 <?php else: ?>
@@ -207,7 +483,186 @@ include("../layouts/header.php");
             </div>
         </div>
     </div>
-
 </div>
+
+<!-- CRM Follow-up Reminders Checklist -->
+<div class="row g-3 mt-4 mb-4">
+    <div class="col-12">
+        <div class="card p-4 shadow-sm border-0">
+            <h6 class="fw-bold mb-3 text-dark"><i class="bi bi-alarm-fill text-warning me-2"></i>CRM Follow-up Reminders</h6>
+            
+            <div class="nav nav-tabs mb-3" id="reminders-tab" role="tablist">
+                <button class="nav-link active fw-bold text-dark btn-sm" id="tab-today-btn" data-bs-toggle="tab" data-bs-target="#tab-today" type="button" role="tab">Today's Reminders (<?php echo count($todayFollowups); ?>)</button>
+                <button class="nav-link fw-bold text-danger btn-sm" id="tab-overdue-btn" data-bs-toggle="tab" data-bs-target="#tab-overdue" type="button" role="tab">Overdue (<?php echo count($overdueFollowups); ?>)</button>
+                <button class="nav-link fw-bold text-secondary btn-sm" id="tab-tomorrow-btn" data-bs-toggle="tab" data-bs-target="#tab-tomorrow" type="button" role="tab">Tomorrow's Reminders (<?php echo count($tomorrowFollowups); ?>)</button>
+            </div>
+            
+            <div class="tab-content" id="reminders-tabContent" style="font-size:13px;">
+                <!-- Today's Reminders -->
+                <div class="tab-pane fade show active" id="tab-today" role="tabpanel">
+                    <?php if (empty($todayFollowups)): ?>
+                        <div class="text-muted py-2"><i class="bi bi-check-circle me-1 text-success"></i> No follow-ups scheduled for today.</div>
+                    <?php else: ?>
+                        <div class="list-group list-group-flush">
+                            <?php foreach ($todayFollowups as $rem): ?>
+                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <span class="badge bg-warning text-dark me-2">[<?php echo strtoupper($rem['type']); ?>]</span>
+                                        <strong><?php echo htmlspecialchars($rem['full_name_ar'] ?: $rem['full_name_en'] ?: $rem['mobile']); ?></strong> - <?php echo htmlspecialchars($rem['notes']); ?>
+                                    </div>
+                                    <span class="text-secondary small"><?php echo $rem['followup_time']; ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <!-- Overdue Reminders -->
+                <div class="tab-pane fade" id="tab-overdue" role="tabpanel">
+                    <?php if (empty($overdueFollowups)): ?>
+                        <div class="text-muted py-2"><i class="bi bi-check-circle me-1 text-success"></i> No overdue reminders.</div>
+                    <?php else: ?>
+                        <div class="list-group list-group-flush">
+                            <?php foreach ($overdueFollowups as $rem): ?>
+                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <span class="badge bg-danger me-2">[<?php echo strtoupper($rem['type']); ?>]</span>
+                                        <strong><?php echo htmlspecialchars($rem['full_name_ar'] ?: $rem['full_name_en'] ?: $rem['mobile']); ?></strong> - <?php echo htmlspecialchars($rem['notes']); ?>
+                                    </div>
+                                    <span class="text-danger fw-bold small"><?php echo $rem['followup_date']; ?> <?php echo $rem['followup_time']; ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+                
+                <!-- Tomorrow's Reminders -->
+                <div class="tab-pane fade" id="tab-tomorrow" role="tabpanel">
+                    <?php if (empty($tomorrowFollowups)): ?>
+                        <div class="text-muted py-2"><i class="bi bi-calendar me-1"></i> No follow-ups scheduled for tomorrow.</div>
+                    <?php else: ?>
+                        <div class="list-group list-group-flush">
+                            <?php foreach ($tomorrowFollowups as $rem): ?>
+                                <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                    <div>
+                                        <span class="badge bg-secondary me-2">[<?php echo strtoupper($rem['type']); ?>]</span>
+                                        <strong><?php echo htmlspecialchars($rem['full_name_ar'] ?: $rem['full_name_en'] ?: $rem['mobile']); ?></strong> - <?php echo htmlspecialchars($rem['notes']); ?>
+                                    </div>
+                                    <span class="text-secondary small"><?php echo $rem['followup_time']; ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    // Reminders notification popup alert
+    const todayCount = <?php echo count($todayFollowups); ?>;
+    const overdueCount = <?php echo count($overdueFollowups); ?>;
+    if (todayCount > 0 || overdueCount > 0) {
+        let msg = "⏰ CRM Reminders Alert:\n";
+        if (overdueCount > 0) msg += `• You have ${overdueCount} OVERDUE follow-ups!\n`;
+        if (todayCount > 0) msg += `• You have ${todayCount} follow-ups scheduled for today.\n`;
+        msg += "\nPlease check the Follow-up Reminders panel.";
+        alert(msg);
+    }
+
+    // 1. Messages History Chart (Line Chart)
+    const ctxHistory = document.getElementById('messagesHistoryChart').getContext('2d');
+    new Chart(ctxHistory, {
+        type: 'line',
+        data: {
+            labels: <?php echo json_encode(array_map(function($d) { return date('M d', strtotime($d)); }, $chartDates)); ?>,
+            datasets: [
+                {
+                    label: 'Sent',
+                    data: <?php echo json_encode($chartSent); ?>,
+                    borderColor: '#10b981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                },
+                {
+                    label: 'Failed',
+                    data: <?php echo json_encode($chartFailed); ?>,
+                    borderColor: '#ef4444',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top' }
+            },
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
+        }
+    });
+
+    // 2. Status Chart (Doughnut Chart)
+    const ctxStatus = document.getElementById('statusChart').getContext('2d');
+    new Chart(ctxStatus, {
+        type: 'doughnut',
+        data: {
+            labels: ['Open', 'Pending', 'Closed'],
+            datasets: [{
+                data: [
+                    <?php echo $statusCounts['open']; ?>,
+                    <?php echo $statusCounts['pending']; ?>,
+                    <?php echo $statusCounts['closed']; ?>
+                ],
+                backgroundColor: ['#10b981', '#f59e0b', '#64748b'],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            }
+        }
+    });
+
+    // 3. Employee Productivity Chart (Horizontal Bar Chart)
+    const ctxEmp = document.getElementById('employeeProductivityChart').getContext('2d');
+    new Chart(ctxEmp, {
+        type: 'bar',
+        data: {
+            labels: <?php echo json_encode($empNames); ?>,
+            datasets: [{
+                label: 'Messages',
+                data: <?php echo json_encode($empMessageCounts); ?>,
+                backgroundColor: '#6366f1',
+                borderRadius: 5
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false }
+            },
+            scales: {
+                x: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
+        }
+    });
+});
+</script>
 
 <?php include("../layouts/footer.php"); ?>

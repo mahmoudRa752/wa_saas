@@ -1,6 +1,9 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Employee/EmployeeRepository.php');
+
+use Core\Employee\EmployeeRepository;
 
 if (!isset($_SESSION['company_id']) || $_SESSION['role'] != 'admin') {
     header("Location: index.php");
@@ -8,6 +11,7 @@ if (!isset($_SESSION['company_id']) || $_SESSION['role'] != 'admin') {
 }
 
 $company_id = $_SESSION['company_id'];
+$empRepo = new EmployeeRepository($conn);
 
 /* ============================
    ✅ حذف موظف
@@ -16,64 +20,40 @@ if (isset($_GET['delete'])) {
 
     $id = intval($_GET['delete']);
 
-    // حذف رقم واتساب أولاً
-    $stmt = $conn->prepare("DELETE FROM whatsapp_numbers WHERE user_id = ?");
-    $stmt->bind_param("i", $id);
-    $stmt->execute();
+    $empRepo->deletePhoneNumbers($id);
+    $empRepo->delete($id, $company_id);
 
-    // حذف الموظف
-    $stmt = $conn->prepare("DELETE FROM users WHERE id = ? AND company_id = ?");
-    $stmt->bind_param("ii", $id, $company_id);
-    $stmt->execute();
+    require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+    $auditService = new \Core\Services\AuditLogService($conn);
+    $auditService->log($company_id, $_SESSION['user_id'] ?? null, 'delete_employee', "Deleted employee ID $id");
 
     header("Location: employees.php");
     exit;
 }
 
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
+
 /* ============================
    ✅ تعديل موظف
 ============================ */
 if (isset($_POST['update'])) {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'employees')) {
+        die("Invalid CSRF Token.");
+    }
 
     $user_id = intval($_POST['user_id']);
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
     $phone_number_id = trim($_POST['phone_number_id']);
 
-    // تحديث بيانات الموظف
-    $stmt = $conn->prepare("
-        UPDATE users 
-        SET name=?, email=? 
-        WHERE id=? AND company_id=?
-    ");
-    $stmt->bind_param("ssii", $name, $email, $user_id, $company_id);
-    $stmt->execute();
+    $empRepo->update($user_id, $company_id, $name, $email);
+    $empRepo->upsertPhoneNumber($user_id, $phone_number_id);
 
-    // تحقق من وجود رقم سابق
-    $check = $conn->prepare("SELECT id FROM whatsapp_numbers WHERE user_id = ?");
-    $check->bind_param("i", $user_id);
-    $check->execute();
-    $result = $check->get_result();
-
-    if ($result->num_rows > 0) {
-
-        $stmt2 = $conn->prepare("
-            UPDATE whatsapp_numbers 
-            SET phone_number_id=? 
-            WHERE user_id=?
-        ");
-        $stmt2->bind_param("si", $phone_number_id, $user_id);
-        $stmt2->execute();
-
-    } else {
-
-        $stmt2 = $conn->prepare("
-            INSERT INTO whatsapp_numbers (user_id, phone_number_id)
-            VALUES (?, ?)
-        ");
-        $stmt2->bind_param("is", $user_id, $phone_number_id);
-        $stmt2->execute();
-    }
+    require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+    $auditService = new \Core\Services\AuditLogService($conn);
+    $auditService->log($company_id, $_SESSION['user_id'] ?? null, 'update_employee', "Updated employee '$name' (ID $user_id)");
 
     $success = "✅ Employee updated successfully!";
 }
@@ -82,40 +62,29 @@ if (isset($_POST['update'])) {
    ✅ إضافة موظف
 ============================ */
 if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_POST['update'])) {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'employees')) {
+        die("Invalid CSRF Token.");
+    }
 
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
     $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
     $phone_number_id = trim($_POST['phone_number_id']);
 
-    $check = $conn->prepare("SELECT id FROM users WHERE email = ?");
-    $check->bind_param("s", $email);
-    $check->execute();
-    $exists = $check->get_result();
-
-    if ($exists->num_rows > 0) {
-
+    if ($empRepo->emailExists($email)) {
         $error = "This email is already registered.";
-
     } else {
-
-        $stmt = $conn->prepare("
-            INSERT INTO users (company_id, name, email, password, role)
-            VALUES (?, ?, ?, ?, 'employee')
-        ");
-        $stmt->bind_param("isss", $company_id, $name, $email, $password);
-
-        if ($stmt->execute()) {
-
-            $user_id = $stmt->insert_id;
-
-            $stmt2 = $conn->prepare("
-                INSERT INTO whatsapp_numbers (user_id, phone_number_id)
-                VALUES (?, ?)
-            ");
-            $stmt2->bind_param("is", $user_id, $phone_number_id);
-            $stmt2->execute();
-
+        $user_id = $empRepo->create($company_id, $name, $email, $password);
+        if ($user_id) {
+            if (!empty($phone_number_id)) {
+                $empRepo->upsertPhoneNumber($user_id, $phone_number_id);
+            }
+            
+            require_once(__DIR__ . '/../core/Services/AuditLogService.php');
+            $auditService = new \Core\Services\AuditLogService($conn);
+            $auditService->log($company_id, $_SESSION['user_id'] ?? null, 'create_employee', "Created employee '$name' (ID $user_id)");
+            
             $success = "✅ Employee added successfully!";
         }
     }
@@ -124,15 +93,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && !isset($_POST['update'])) {
 /* ============================
    ✅ جلب الموظفين
 ============================ */
-$stmt = $conn->prepare("
-    SELECT u.id, u.name, u.email, w.phone_number_id
-    FROM users u
-    LEFT JOIN whatsapp_numbers w ON u.id = w.user_id
-    WHERE u.company_id = ?
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$employees = $stmt->get_result();
+$employeesList = $empRepo->getWithPhoneNumbers($company_id);
 
 include("../layouts/header.php");
 ?>
@@ -152,6 +113,7 @@ include("../layouts/header.php");
                 <h5>Add Employee</h5>
 
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('employees'); ?>">
                     <input type="text" name="name" class="form-control mb-2" placeholder="Name" required>
                     <input type="email" name="email" class="form-control mb-2" placeholder="Email" required>
                     <input type="password" name="password" class="form-control mb-2" placeholder="Password" required>
@@ -178,7 +140,7 @@ include("../layouts/header.php");
                     </thead>
                     <tbody>
 
-                    <?php while($row = $employees->fetch_assoc()): ?>
+                    <?php foreach($employeesList as $row): ?>
                         <tr>
                             <td><?php echo htmlspecialchars($row['name']); ?></td>
                             <td><?php echo htmlspecialchars($row['email']); ?></td>
@@ -197,7 +159,7 @@ include("../layouts/header.php");
                                 </a>
                             </td>
                         </tr>
-                    <?php endwhile; ?>
+                    <?php endforeach; ?>
 
                     </tbody>
                 </table>
@@ -211,6 +173,7 @@ include("../layouts/header.php");
         <div class="modal-dialog">
             <div class="modal-content">
                 <form method="POST">
+                    <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('employees'); ?>">
                     <div class="modal-header">
                         <h5 class="modal-title">Edit Employee</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>

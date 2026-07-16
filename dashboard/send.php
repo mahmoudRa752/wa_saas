@@ -2,8 +2,19 @@
 session_start();
 require_once("../config/db.php");
 require_once("../vendor/autoload.php");
+require_once(__DIR__ . '/../core/Services/WhatsAppService.php');
+require_once(__DIR__ . '/../core/Services/UsageService.php');
 
+use Core\Services\UsageService;
+use Core\Services\WhatsAppService;
+use Core\Company\CompanyRepository;
+use Core\WhatsAppNumber\WhatsAppNumberRepository;
+use Core\MessageLog\MessageLogRepository;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+require_once(__DIR__ . '/../core/WhatsAppNumber/WhatsAppNumberRepository.php');
+require_once(__DIR__ . '/../core/MessageLog/MessageLogRepository.php');
 
 if (!isset($_SESSION['company_id'])) {
     header("Location: ../auth/login.php");
@@ -13,47 +24,46 @@ if (!isset($_SESSION['company_id'])) {
 $company_id = $_SESSION['company_id'];
 $role = $_SESSION['role'];
 
-/* ===============================
-   ✅ جلب limit الشهري
-================================= */
-$stmt = $conn->prepare("
-    SELECT p.monthly_limit
-    FROM companies c
-    JOIN plans p ON c.plan_id = p.id
-    WHERE c.id = ?
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$limit = $stmt->get_result()->fetch_assoc()['monthly_limit'] ?? 0;
+$userId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 0;
+if ($userId === 0 && isset($_SESSION['company_id'])) {
+    $stmt = $conn->prepare("SELECT id FROM users WHERE company_id = ? AND role = 'admin' LIMIT 1");
+    if ($stmt) {
+        $stmt->bind_param("i", $_SESSION['company_id']);
+        $stmt->execute();
+        $row = $stmt->get_result()->fetch_assoc();
+        if ($row) {
+            $userId = (int)$row['id'];
+            $_SESSION['user_id'] = $userId;
+        }
+        $stmt->close();
+    }
+}
 
-/* ===============================
-   ✅ عدد الرسائل هذا الشهر
-================================= */
-$stmt = $conn->prepare("
-    SELECT COUNT(*) as total
-    FROM messages m
-    JOIN users u ON m.user_id = u.id
-    WHERE u.company_id = ?
-    AND MONTH(m.sent_at) = MONTH(CURRENT_DATE())
-");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$used = $stmt->get_result()->fetch_assoc()['total'] ?? 0;
+$whatsAppService = new WhatsAppService();
+$usageService = new UsageService($conn);
+$usage = $usageService->getMonthlyLimitAndUsage($company_id);
+$limit = $usage['limit'];
+$used = $usage['used'];
 
 /* ===============================
    ✅ جلب الموظفين (Admin فقط)
 ================================= */
 if ($role == 'admin') {
-    $stmt = $conn->prepare("SELECT id, name FROM users WHERE company_id = ?");
-    $stmt->bind_param("i", $company_id);
-    $stmt->execute();
-    $employees = $stmt->get_result();
+    $companyRepo = new CompanyRepository($conn);
+    $employeesList = $companyRepo->getEmployees($company_id);
 }
+
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
 
 /* ===============================
    ✅ تنفيذ الإرسال
 ================================= */
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'send_messages')) {
+        die("Invalid CSRF Token.");
+    }
 
     if ($used >= $limit) {
         $error = "❌ Monthly message limit reached.";
@@ -69,16 +79,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         $accessToken = WHATSAPP_TOKEN;
 
         // ✅ جلب رقم واتساب
-        $stmt = $conn->prepare("SELECT phone_number_id FROM whatsapp_numbers WHERE user_id = ?");
-        $stmt->bind_param("i", $user_id);
-        $stmt->execute();
-        $numberData = $stmt->get_result()->fetch_assoc();
+        $waNumberRepo = new WhatsAppNumberRepository($conn);
+        $phoneNumberId = $waNumberRepo->getPhoneNumberIdByUserId($user_id);
 
-        if (!$numberData) {
+        if (!$phoneNumberId) {
             $error = "No WhatsApp number linked.";
         } else {
-
-            $phoneNumberId = $numberData['phone_number_id'];
 
             if ($mode == "manual") {
 
@@ -91,13 +97,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         $message
                 );
 
-                sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken);
+                sendWhatsApp($user_id, $phoneNumberId, $recipient, $message, $accessToken);
                 $success = "✅ Message sent successfully!";
 
             } else {
 
-                $spreadsheet = IOFactory::load($_FILES['excel_file']['tmp_name']);
-                $sheet = $spreadsheet->getActiveSheet();
+                $fileTmp = $_FILES['excel_file']['tmp_name'];
+                $fileName = $_FILES['excel_file']['name'];
+                $fileExt = strtolower(pathinfo($fileName, PATHINFO_EXTENSION));
+
+                if ($fileExt !== 'xlsx' && $fileExt !== 'csv') {
+                    $error = "❌ Invalid file type. Please upload .xlsx or .csv files only.";
+                } else {
+                    $spreadsheet = IOFactory::load($fileTmp);
+                    $sheet = $spreadsheet->getActiveSheet();
                 $rows = $sheet->toArray();
 
                 $headers = $rows[0];
@@ -114,10 +127,11 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         $message = str_replace("{" . $columnName . "}", $value, $message);
                     }
 
-                    sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken);
+                    sendWhatsApp($user_id, $phoneNumberId, $recipient, $message, $accessToken);
                 }
 
                 $success = "✅ Bulk messages processed!";
+                }
             }
         }
     }
@@ -126,34 +140,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 /* ===============================
    ✅ دالة الإرسال
 ================================= */
-function sendWhatsApp($phoneNumberId, $recipient, $message, $accessToken){
+function sendWhatsApp($user_id, $phoneNumberId, $recipient, &$message, $accessToken){
 
     global $conn;
+    global $whatsAppService;
 
-    $url = "https://graph.facebook.com/v19.0/$phoneNumberId/messages";
+    $result = $whatsAppService->sendText($phoneNumberId, $recipient, $message, $accessToken);
+    $httpCode = $result['httpCode'];
 
-    $payload = [
-            "messaging_product" => "whatsapp",
-            "to" => $recipient,
-            "type" => "text",
-            "text" => ["body" => $message]
-    ];
+    if ($httpCode != 200) {
+        $whatsAppService->sendTemplate($phoneNumberId, $recipient, $accessToken);
+        $message = "[Template: hello_world]";
+    }
 
-    $ch = curl_init($url);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-            "Authorization: Bearer $accessToken",
-            "Content-Type: application/json"
-    ]);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload));
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-
-    curl_exec($ch);
-    curl_close($ch);
-
-    $stmt = $conn->prepare("INSERT INTO messages (user_id, recipient, message, status) VALUES (?, ?, ?, 'sent')");
-    $stmt->bind_param("iss", $_SESSION['user_id'], $recipient, $message);
-    $stmt->execute();
+    $msgLogRepo = new MessageLogRepository($conn);
+    $msgLogRepo->logSentMessage($user_id, $recipient, $message);
 }
 
 include("../layouts/header.php");
@@ -170,6 +171,7 @@ include("../layouts/header.php");
         <?php endif; ?>
 
         <form method="POST" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('send_messages'); ?>">
 
             <?php if($role == 'admin'): ?>
 
@@ -177,17 +179,17 @@ include("../layouts/header.php");
                     <label>Select Employee</label>
                     <select name="user_id" class="form-control" required>
                         <option value="">Choose employee</option>
-                        <?php while($emp = $employees->fetch_assoc()): ?>
+                        <?php foreach($employeesList as $emp): ?>
                             <option value="<?php echo $emp['id']; ?>">
-                                <?php echo $emp['name']; ?>
+                                <?php echo htmlspecialchars($emp['name']); ?>
                             </option>
-                        <?php endwhile; ?>
+                        <?php endforeach; ?>
                     </select>
                 </div>
 
             <?php else: ?>
 
-                <input type="hidden" name="user_id" value="<?php echo $_SESSION['user_id']; ?>">
+                <input type="hidden" name="user_id" value="<?php echo $userId; ?>">
 
                 <div class="mb-3">
                     <label>Sending From</label>

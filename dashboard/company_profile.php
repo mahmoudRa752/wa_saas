@@ -1,6 +1,9 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Company/CompanyRepository.php');
+
+use Core\Company\CompanyRepository;
 
 if (!isset($_SESSION['company_id']) || $_SESSION['role'] != 'admin') {
     header("Location: index.php");
@@ -8,48 +11,36 @@ if (!isset($_SESSION['company_id']) || $_SESSION['role'] != 'admin') {
 }
 
 $company_id = $_SESSION['company_id'];
+$companyRepo = new CompanyRepository($conn);
 
 // ✅ جلب بيانات الشركة بأمان
-$stmt = $conn->prepare("SELECT name, email FROM companies WHERE id = ?");
-$stmt->bind_param("i", $company_id);
-$stmt->execute();
-$result = $stmt->get_result();
+$company = $companyRepo->getById($company_id);
 
-if ($result->num_rows == 0) {
+if (!$company) {
     die("Company not found.");
 }
 
-$company = $result->fetch_assoc();
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'company_profile')) {
+        die("Invalid CSRF Token.");
+    }
 
     $name = trim($_POST['name']);
     $email = trim($_POST['email']);
+    $passwordHash = !empty($_POST['password']) ? password_hash($_POST['password'], PASSWORD_DEFAULT) : null;
 
-    if (!empty($_POST['password'])) {
-
-        $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
-
-        $update = $conn->prepare("UPDATE companies SET name=?, email=?, password=? WHERE id=?");
-        $update->bind_param("sssi", $name, $email, $password, $company_id);
-
-    } else {
-
-        $update = $conn->prepare("UPDATE companies SET name=?, email=? WHERE id=?");
-        $update->bind_param("ssi", $name, $email, $company_id);
-    }
-
-    $update->execute();
+    $companyRepo->updateProfile($company_id, $name, $email, $passwordHash);
 
     $_SESSION['company_name'] = $name;
 
     $success = "✅ Profile updated successfully!";
 
     // ✅ إعادة تحميل البيانات بعد التحديث
-    $stmt = $conn->prepare("SELECT name, email FROM companies WHERE id = ?");
-    $stmt->bind_param("i", $company_id);
-    $stmt->execute();
-    $company = $stmt->get_result()->fetch_assoc();
+    $company = $companyRepo->getById($company_id);
 }
 
 include("../layouts/header.php");
@@ -62,6 +53,7 @@ include("../layouts/header.php");
         <?php endif; ?>
 
         <form method="POST">
+            <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('company_profile'); ?>">
 
             <div class="mb-3">
                 <label>Company Name</label>

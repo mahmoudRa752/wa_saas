@@ -1,6 +1,9 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Subscription/SubscriptionRepository.php');
+
+use Core\Subscription\SubscriptionRepository;
 
 if (!isset($_SESSION['company_id']) || $_SESSION['role'] != 'admin') {
     header("Location: index.php");
@@ -8,20 +11,22 @@ if (!isset($_SESSION['company_id']) || $_SESSION['role'] != 'admin') {
 }
 
 $company_id = $_SESSION['company_id'];
-$plans = $conn->query("SELECT * FROM plans ORDER BY price ASC");
+$subRepo = new SubscriptionRepository($conn);
+$plans_arr = $subRepo->getAllPlans();
+
+require_once(__DIR__ . '/../core/Auth/CsrfHelper.php');
+use Core\Auth\CsrfHelper;
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $token = $_POST['csrf_token'] ?? '';
+    if (!CsrfHelper::validateToken($token, 'upgrade')) {
+        die("Invalid CSRF Token.");
+    }
     $plan_id = intval($_POST['plan_id']);
     $start   = date("Y-m-d");
     $end     = date("Y-m-d", strtotime("+30 days"));
 
-    $del = $conn->prepare("DELETE FROM subscriptions WHERE company_id = ?");
-    $del->bind_param("i", $company_id);
-    $del->execute();
-
-    $stmt = $conn->prepare("INSERT INTO subscriptions (company_id, plan_id, start_date, end_date) VALUES (?, ?, ?, ?)");
-    $stmt->bind_param("iiss", $company_id, $plan_id, $start, $end);
-    $stmt->execute();
+    $subRepo->activate($company_id, $plan_id, $start, $end);
 
     $success = "✅ Subscription activated successfully!";
 }
@@ -40,8 +45,6 @@ include("../layouts/header.php");
 <div class="row g-4 justify-content-center">
 
     <?php
-    $plans_arr = [];
-    while ($plan = $plans->fetch_assoc()) $plans_arr[] = $plan;
     $mid = floor(count($plans_arr) / 2);
 
     foreach ($plans_arr as $i => $plan):
@@ -82,6 +85,7 @@ include("../layouts/header.php");
             </ul>
 
             <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo CsrfHelper::generateToken('upgrade'); ?>">
                 <input type="hidden" name="plan_id" value="<?php echo $plan['id']; ?>">
                 <button class="btn <?php echo $featured ? 'btn-primary' : 'btn-outline-primary'; ?> w-100">
                     Choose <?php echo htmlspecialchars($plan['name']); ?>

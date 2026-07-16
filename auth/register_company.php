@@ -1,62 +1,38 @@
 <?php
 session_start();
 require_once("../config/db.php");
+require_once(__DIR__ . '/../core/Auth/AuthRepository.php');
+
+use Core\Auth\AuthRepository;
+
+if (isset($_SESSION['company_id'])) {
+    header("Location: ../dashboard/index.php");
+    exit();
+}
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
-    $email    = trim($_POST['email']);
-    $password = $_POST['password'];
-    $type     = $_POST['type'];
+    $name = isset($_POST['name']) ? trim($_POST['name']) : '';
+    $email = isset($_POST['email']) ? trim($_POST['email']) : '';
+    $password = isset($_POST['password']) ? password_hash($_POST['password'], PASSWORD_DEFAULT) : '';
+    
+    $authRepo = new AuthRepository($conn);
 
-    if ($type === "company") {
+    $existing = $authRepo->findCompanyByNameAndEmail($name, $email);
 
-        $stmt = $conn->prepare("SELECT * FROM companies WHERE email = ?");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($result->num_rows > 0) {
-            $company = $result->fetch_assoc();
-            if (password_verify($password, $company['password'])) {
-                $_SESSION['company_id']   = $company['id'];
-                $_SESSION['company_name'] = $company['name'];
-                $_SESSION['role']         = "admin";
-                header("Location: ../dashboard/index.php");
-                exit;
-            } else {
-                $error = "Wrong password!";
-            }
-        } else {
-            $error = "Company not found!";
-        }
-
+    if ($existing) {
+        $error = "Company name or email already exists.";
     } else {
-
-        $stmt = $conn->prepare("
-            SELECT u.*, c.name as company_name
-            FROM users u
-            JOIN companies c ON u.company_id = c.id
-            WHERE u.email = ?
-        ");
-        $stmt->bind_param("s", $email);
-        $stmt->execute();
-        $result = $stmt->get_result();
-
-        if ($result->num_rows > 0) {
-            $user = $result->fetch_assoc();
-            if (password_verify($password, $user['password'])) {
-                $_SESSION['user_id']      = $user['id'];
-                $_SESSION['user_name']    = $user['name'];
-                $_SESSION['company_id']   = $user['company_id'];
-                $_SESSION['company_name'] = $user['company_name'];
-                $_SESSION['role']         = "employee";
-                header("Location: ../dashboard/index.php");
-                exit;
-            } else {
-                $error = "Wrong password!";
-            }
+        $company_id = $authRepo->createCompany($name, $email, $password);
+        
+        if ($company_id) {
+            $_SESSION['company_id'] = $company_id;
+            $_SESSION['company_name'] = $name;
+            $_SESSION['role'] = "admin";
+            header("Location: ../dashboard/index.php");
+            exit;
         } else {
-            $error = "Employee not found!";
+            $error = "Error creating company.";
         }
     }
 }
@@ -65,7 +41,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WA Manager — Login</title>
+    <title>WA Manager — Register Company</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -106,33 +82,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             font-size: 0.95rem;
             margin-bottom: 1.5rem;
         }
-        /* تنسيق أزرار التبديل لتبدو احترافية وجنب بعضها */
-        .type-toggle {
-            display: flex;
-            background-color: #f8fafc;
-            padding: 0.4rem;
-            border-radius: 0.5rem;
-            border: 1px solid #e2e8f0;
-            gap: 5px;
-        }
-        .type-toggle input[type="radio"] {
-            display: none;
-        }
-        .type-toggle label {
-            flex: 1;
-            padding: 0.6rem;
-            cursor: pointer;
-            border-radius: 0.375rem;
-            font-weight: 600;
-            color: #64748b;
-            transition: all 0.2s;
-            margin: 0;
-        }
-        .type-toggle input[type="radio"]:checked + label {
-            background-color: #ffffff;
-            color: #2563eb;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
     </style>
 </head>
 <body>
@@ -141,10 +90,10 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     <div class="login-card">
 
-        <div class="login-logo">💬</div>
+        <div class="login-logo">🏢</div>
 
-        <h4 class="fw-bold text-dark">Welcome Back</h4>
-        <p class="subtitle">Sign in to your WA Manager account</p>
+        <h4 class="fw-bold text-dark">Register Company</h4>
+        <p class="subtitle">Create your WA Manager account</p>
 
         <?php if (isset($error)): ?>
             <div class="alert alert-danger mb-3 py-2 text-start" style="font-size: 14px;">
@@ -155,16 +104,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         <form method="POST" class="text-start">
 
-            <div class="type-toggle mb-4">
-                <input type="radio" name="type" id="type_company" value="company" <?php echo (!isset($_POST['type']) || $_POST['type'] === 'company') ? 'checked' : ''; ?>>
-                <label for="type_company" class="text-center">
-                    <i class="bi bi-building me-1"></i> Company
-                </label>
-
-                <input type="radio" name="type" id="type_employee" value="employee" <?php echo (isset($_POST['type']) && $_POST['type'] === 'employee') ? 'checked' : ''; ?>>
-                <label for="type_employee" class="text-center">
-                    <i class="bi bi-person me-1"></i> Employee
-                </label>
+            <div class="mb-3">
+                <label class="form-label fw-medium text-secondary" style="font-size: 14px;">Company Name</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-white border-end-0" style="border-radius:10px 0 0 10px; border:1.5px solid #e2e8f0;">
+                        <i class="bi bi-building text-muted"></i>
+                    </span>
+                    <input type="text" name="name" class="form-control border-start-0"
+                           style="border-radius:0 10px 10px 0; border:1.5px solid #e2e8f0;"
+                           placeholder="Acme Corp"
+                           value="<?php echo isset($_POST['name']) ? htmlspecialchars($_POST['name']) : ''; ?>" required>
+                </div>
             </div>
 
             <div class="mb-3">
@@ -199,7 +149,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             </div>
 
             <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" style="font-size:15px; background-color: #2563eb; border: none;">
-                Sign In <i class="bi bi-arrow-right ms-1"></i>
+                Sign Up <i class="bi bi-arrow-right ms-1"></i>
             </button>
 
         </form>
@@ -207,13 +157,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <hr style="margin:24px 0; border-color:#e2e8f0;">
 
         <div class="text-center" style="font-size:13px; color:#64748b;">
-            New here?
-            <a href="register_company.php" style="color:#2563eb; font-weight:600; text-decoration:none;">
-                Register Company
-            </a>
-            &nbsp;·&nbsp;
-            <a href="register_employee.php" style="color:#2563eb; font-weight:600; text-decoration:none;">
-                Register Employee
+            Already have an account?
+            <a href="login.php" style="color:#2563eb; font-weight:600; text-decoration:none;">
+                Sign In
             </a>
         </div>
 
