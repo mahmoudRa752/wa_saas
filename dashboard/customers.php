@@ -401,7 +401,11 @@ include("../layouts/header.php");
         <div class="<?php echo $isAdmin ? 'col-md-2' : 'col-md-6'; ?> d-flex gap-2">
             <button type="submit" class="btn btn-primary btn-sm flex-fill fw-semibold"><i class="bi bi-filter me-1"></i> Apply Filters</button>
             <a href="customers.php" class="btn btn-outline-secondary btn-sm px-3 fw-semibold"><i class="bi bi-arrow-counterclockwise"></i></a>
-        <!-- Bulk Actions Banner (Floating dynamic alert) -->
+        </div>
+    </div>
+</form>
+
+<!-- Bulk Actions Banner (Floating dynamic alert) -->
 <div id="bulk-actions-banner" class="alert alert-dark p-3 shadow-lg border-0 d-none justify-content-between align-items-center mb-3" style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 1050px; z-index: 1050; border-radius: 12px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);">
     <div class="d-flex align-items-center gap-2 text-white">
         <i class="bi bi-check2-square text-success fs-5"></i>

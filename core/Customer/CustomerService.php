@@ -388,7 +388,7 @@ class CustomerService
                 $mapping['project_name'] = $index;
             } elseif (self::matchesKeyword($header, ['البرنامج', 'program'])) {
                 $mapping['program_name'] = $index;
-            } elseif (self::matchesKeyword($header, ['جهة العمل', 'جهة التوظيف', 'صاحب العمل', 'الجهة', 'الشركة', 'employer', 'company'])) {
+            } elseif (self::matchesKeyword($header, ['جهة العمل', 'جهة التوظيف', 'صاحب العمل', 'الجهة', 'الشركة', 'اسم جهة العمل', 'employer', 'company', 'organization', 'work place'])) {
                 $mapping['employer'] = $index;
             }
         }
